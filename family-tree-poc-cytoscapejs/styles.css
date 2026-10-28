@@ -32,6 +32,9 @@ body {
 .eyebrow { margin: 0 0 6px; color: #6a746b; font-size: 12px; }
 h1 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.25; }
 .controls { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.ancestry-control { display: flex; align-items: center; gap: 7px; margin-right: 7px; font-size: 12px; color: #697268; }
+select { height: 36px; max-width: 100%; padding: 0 8px; border: 1px solid #d8ded5; border-radius: 5px; color: #303a34; background: #fff; font: inherit; cursor: pointer; }
+select:focus-visible { outline: 3px solid #afc6a9; outline-offset: 3px; }
 
 button {
   min-width: 36px;
@@ -80,12 +83,19 @@ button:disabled { opacity: .4; cursor: default; }
 .primary-marker { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid #a45a3b; border-radius: 50%; vertical-align: -1px; }
 .separator { margin: 0 7px; color: #a5ad9e; }
 
+@media (max-width: 900px) {
+  .toolbar { flex-wrap: wrap; }
+  .heading { flex-basis: 100%; }
+  .controls { flex-wrap: wrap; max-width: 100%; }
+}
+
 @media (max-width: 640px) {
   .toolbar { flex-wrap: wrap; gap: 14px; padding: 15px 18px; }
   h1 { font-size: 18px; }
   .eyebrow { font-size: 11px; }
   .caption { padding: 9px 18px; font-size: 10px; }
   .tree-area { --notes-width: 150px; }
-  .controls { gap: 5px; }
+  .controls { gap: 5px; flex-wrap: wrap; width: 100%; }
+  .ancestry-control { width: 100%; margin: 0 0 5px; }
   .fit-button { margin-left: 3px; padding: 0 9px; }
 }

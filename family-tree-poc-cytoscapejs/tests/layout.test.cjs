@@ -12,8 +12,8 @@ const people = new Map(data.people.map(p => [p.id, p]));
 let assertions = 0;
 function check(condition, message) { assertions++; assert.ok(condition, message); }
 
-for (const primary of data.people) {
-  const scene = build(data, primary.id);
+function checkLayout(primary, ancestorDepth) {
+  const scene = build(data, primary.id, {ancestorDepth});
   const nodes = scene.elements.filter(e => e.data.kind !== 'edge');
   const persons = nodes.filter(e => e.data.kind === 'person');
   const byId = new Map(nodes.map(n => [n.data.id, n]));
@@ -28,6 +28,19 @@ for (const primary of data.people) {
     check(Number.isFinite(node.position.x) && Number.isFinite(node.position.y), 'Coordenadas finitas');
     const level = scene.levels.find(l => l.id === node.data.level);
     check(level && node.position.y - 36 >= level.top && node.position.y + 90 <= level.bottom, 'Persona dentro de su franja');
+    if (!node.data.generation) continue;
+    check(node.data.generation <= ancestorDepth, 'Ascendencia limitada a la profundidad solicitada');
+    check(node.data.ancestorSide === 'paternal' ? node.position.x < 0 : node.position.x > 0, 'Antepasados en el lado correcto');
+    const parents = persons.filter(p => p.data.generation === node.data.generation + 1 &&
+      p.data.ancestorSide === node.data.ancestorSide && (p.data.personId === node.data.fatherId || p.data.personId === node.data.motherId));
+    if (parents.length === 2) {
+      check(Math.abs(node.position.x - (parents[0].position.x + parents[1].position.x) / 2) < 0.001, 'Antepasado bajo el centro de sus progenitores');
+      check(parents.find(p => p.data.personId === node.data.fatherId).position.x < parents.find(p => p.data.personId === node.data.motherId).position.x, 'Padre a la izquierda y madre a la derecha en cada rama ancestral');
+    }
+  }
+  for (let i = 0; i < persons.length; i++) for (let j = i + 1; j < persons.length; j++) {
+    const a = persons[i].position, b = persons[j].position;
+    check(Math.abs(a.x - b.x) >= 140 || Math.abs(a.y - b.y) >= 126, 'Espacio suficiente entre personas y sus nombres');
   }
   for (const edge of edges) {
     check(byId.has(edge.data.source) && byId.has(edge.data.target), 'Extremos de conexiones válidos');
@@ -64,18 +77,47 @@ for (const primary of data.people) {
   const families = scene.groups.filter(g => g.familyKind === 'descendant');
   if (families.length === 1) check(families[0].center === 0, 'Una sola familia de descendencia centrada');
 }
+for (const primary of data.people) {
+  for (const ancestorDepth of [2, 3]) checkLayout(primary, ancestorDepth);
+}
 
 const scene = build(data);
-assert.equal(scene.stats.people, 35);
-assert.equal(scene.levels.length, 6);
-assert.deepEqual(Array.from(scene.levels, l => l.id), ['grandparents','parents','siblings','partners','children','grandchildren']);
-for (const text of [scene.levels[2].text, scene.levels[2].shortText]) {
+assert.equal(scene.stats.people, 43);
+assert.equal(scene.stats.greatGrandparents, 8);
+assert.equal(scene.levels.length, 7);
+assert.deepEqual(Array.from(scene.levels, l => l.id), ['great-grandparents','grandparents','parents','siblings','partners','children','grandchildren']);
+const siblingLevel = scene.levels.find(l => l.id === 'siblings');
+for (const text of [siblingLevel.text, siblingLevel.shortText]) {
   check(text.includes('centro') && text.includes('medios hermanos') && text.includes('paternos') && text.includes('izquierda') && text.includes('maternos') && text.includes('derecha'),
     'Las notas compactas conservan la posición de hermanos y medios hermanos');
 }
+
+const shallow = build(data, data.primaryId, {ancestorDepth:2});
+assert.equal(shallow.stats.people, 35);
+assert.equal(shallow.stats.greatGrandparents, 0);
+assert.equal(shallow.levels.length, 6);
+assert.equal(scene.elements.find(e => e.data.role === 'primary').position.y - shallow.elements.find(e => e.data.role === 'primary').position.y, 180);
+
+for (const grandparent of scene.elements.filter(e => e.data.role === 'grandparent')) {
+  const arrow = scene.elements.find(e => e.classes && e.classes.includes('arrow') && e.data.childId === grandparent.data.personId);
+  assert(arrow, 'Cada abuelo recibe una flecha de sus progenitores');
+  assert.deepEqual(Array.from(arrow.data.parentIds).sort(), [grandparent.data.fatherId, grandparent.data.motherId].sort());
+}
+const incomplete = build({...data, people:data.people.filter(p => p.id !== 'severo')});
+assert.equal(incomplete.stats.greatGrandparents, 7);
+assert(!incomplete.elements.some(e => e.data.personId === 'severo'), 'No se inventan personas para datos ausentes');
+for (const ancestor of incomplete.elements.filter(e => e.data.generation)) {
+  const original = scene.elements.find(e => e.data.personId === ancestor.data.personId && e.data.generation === ancestor.data.generation);
+  assert.equal(ancestor.position.x, original.position.x, 'La ausencia de un progenitor conserva la posición de su rama');
+}
+const oneParentArrow = incomplete.elements.find(e => e.classes && e.classes.includes('arrow') && e.data.childId === 'urbano');
+assert.deepEqual(Array.from(oneParentArrow.data.parentIds), ['carmen']);
+const missingGrandparent = build({...data, people:data.people.filter(p => p.id !== 'urbano')});
+assert.equal(missingGrandparent.stats.greatGrandparents, 6);
+assert(!missingGrandparent.elements.some(e => ['severo','carmen'].includes(e.data.personId)), 'No se muestran ancestros sin una rama conocida que los conecte');
 const juana = scene.elements.find(e => e.data.personId === 'juana');
 for (const id of ['enedina', 'julieta', 'ramon']) {
   const grandchild = scene.elements.find(e => e.data.personId === id);
   check(grandchild.position.x === juana.position.x && grandchild.data.level === 'grandchildren', 'Nietos de diferentes uniones permanecen juntos');
 }
-console.log('Layout correcto: ' + assertions + ' comprobaciones, ' + data.people.length + ' personas como raíz.');
+console.log('Layout correcto: ' + assertions + ' comprobaciones, ' + data.people.length + ' personas como raíz a dos profundidades; ascendencia completa e incompleta.');

@@ -103,7 +103,9 @@
           { text: level.text, font: preferredFont, padding: 10, gap: margin, variant: "full" },
           { text: level.text, font: preferredFont, padding: 6, gap: 5, variant: "full" },
           { text: level.shortText, font: preferredFont, padding: 6, gap: 5, variant: "short" },
-          { text: level.shortText, font: 14, padding: 6, gap: 5, variant: "short" }
+          { text: level.shortText, font: 14, padding: 6, gap: 5, variant: "short" },
+          { text: level.text, font: 14, padding: 2, gap: 2, variant: "full" },
+          { text: level.shortText, font: 14, padding: 2, gap: 2, variant: "short" }
         ];
         let chosen = null;
         for (const candidate of candidates) {

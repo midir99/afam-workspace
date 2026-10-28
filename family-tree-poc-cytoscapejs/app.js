@@ -23,12 +23,15 @@
   }
 
   try {
-    const scene = window.FamilyTreeLayout.build(window.FamilyTreeDemoData);
-    scene.elements.forEach(function (element) {
-      if (element.data.kind === "person") {
-        element.data.avatar = avatar(element.data.initials, element.data.role === "primary");
-      }
-    });
+    function addAvatars(scene) {
+      scene.elements.forEach(function (element) {
+        if (element.data.kind === "person") {
+          element.data.avatar = avatar(element.data.initials, element.data.role === "primary");
+        }
+      });
+      return scene;
+    }
+    let scene = addAvatars(window.FamilyTreeLayout.build(window.FamilyTreeDemoData));
 
     const primary = window.FamilyTreeDemoData.people.find(function (person) {
       return person.id === window.FamilyTreeDemoData.primaryId;
@@ -92,7 +95,7 @@
       ]
     });
 
-    const annotations = window.FamilyTreeAnnotations.attach(cy, scene.levels,
+    let annotations = window.FamilyTreeAnnotations.attach(cy, scene.levels,
       document.getElementById("level-background"), document.getElementById("level-labels"));
 
     const zoomLevel = document.getElementById("zoom-level");
@@ -133,6 +136,27 @@
       } });
     }
 
+    function changeAncestorDepth(depth) {
+      if (depth === scene.ancestorDepth) return;
+      const zoom = cy.zoom();
+      const reference = cy.getElementById(scene.primaryNodeId).renderedPosition();
+      const next = addAvatars(window.FamilyTreeLayout.build(window.FamilyTreeDemoData, scene.primaryId,
+        { ancestorDepth: depth }));
+      annotations.destroy();
+      cy.batch(function () {
+        cy.elements().remove();
+        cy.add(next.elements);
+      });
+      scene = next;
+      annotations = window.FamilyTreeAnnotations.attach(cy, scene.levels,
+        document.getElementById("level-background"), document.getElementById("level-labels"));
+      const position = cy.getElementById(scene.primaryNodeId).position();
+      cy.viewport({ zoom: zoom, pan: {
+        x: reference.x - position.x * zoom,
+        y: reference.y - position.y * zoom
+      } });
+    }
+
     function initialView() {
       fitTree();
       // En pantallas pequeñas, empezar cerca de la persona principal permite leer.
@@ -145,6 +169,9 @@
     document.getElementById("fit-tree").addEventListener("click", fitTree);
     document.getElementById("focus-person").addEventListener("click", focusPerson);
     document.getElementById("focus-person").title = "Centrar en " + primary.name;
+    document.getElementById("ancestor-depth").addEventListener("change", function (event) {
+      changeAncestorDepth(Number(event.target.value));
+    });
     cy.on("zoom", updateZoom);
 
     let previousSize = { width: cy.width(), height: cy.height() };
@@ -166,8 +193,8 @@
     initialView();
 
     // Acceso desde la consola para inspeccionar la geometría de esta prueba.
-    window.familyTreePoc = { cy: cy, scene: scene, data: window.FamilyTreeDemoData,
-      annotations: annotations, fitTree: fitTree, focusPerson: focusPerson };
+    window.familyTreePoc = { cy: cy, get scene() { return scene; }, data: window.FamilyTreeDemoData,
+      get annotations() { return annotations; }, fitTree: fitTree, focusPerson: focusPerson };
   } catch (error) {
     console.error(error);
     showError("No se pudo dibujar el árbol genealógico.");

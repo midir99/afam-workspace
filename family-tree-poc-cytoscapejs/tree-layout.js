@@ -3,8 +3,7 @@
 
   const C = {
     pitch: 155, groupGap: 80, personHalfWidth: 70,
-    grandparentY: 85, parentY: 265, primaryY: 445,
-    partnerY: 625, childY: 805, grandchildY: 985, grandchildPitch: 140
+    levelHeight: 180, nodeOffset: 85, busOffset: 18, grandchildPitch: 140
   };
 
   function labelFor(name) {
@@ -21,13 +20,42 @@
     return String(a.birthDate || "9999").localeCompare(String(b.birthDate || "9999")) || a.id.localeCompare(b.id);
   }
 
-  function build(data, selectedId) {
+  function build(data, selectedId, options) {
     const people = new Map(data.people.map(function (person) { return [person.id, person]; }));
     const primary = people.get(selectedId || data.primaryId);
     if (!primary) throw new Error("No existe la persona principal.");
+    const ancestorDepth = options && options.ancestorDepth === 2 ? 2 : 3;
+    const name = primary.name.trim().split(/\s+/)[0];
+    const levels = [
+      { id: "great-grandparents",
+        text: "Bisabuelos de " + name + ": paternos a la izquierda; maternos a la derecha.",
+        shortText: "Bisabuelos de " + name + ": paternos a la izquierda; maternos a la derecha." },
+      { id: "grandparents",
+        text: "Abuelos de " + name + ": paternos a la izquierda; maternos a la derecha.",
+        shortText: "Abuelos de " + name + ": paternos a la izquierda; maternos a la derecha." },
+      { id: "parents",
+        text: "Padres de " + name + " y sus respectivas parejas: padre y sus parejas a la izquierda; madre y sus parejas a la derecha.",
+        shortText: "Padres de " + name + " y sus parejas: padre a la izquierda; madre a la derecha." },
+      { id: "siblings",
+        text: name + " y sus hermanos al centro; medios hermanos paternos a la izquierda y maternos a la derecha.",
+        shortText: name + " y hermanos al centro; medios hermanos paternos a la izquierda; maternos a la derecha." },
+      { id: "partners", text: "Parejas de " + name + ".", shortText: "Parejas de " + name + "." },
+      { id: "children", text: "Hijos de " + name + ".", shortText: "Hijos de " + name + "." },
+      { id: "grandchildren", text: "Nietos de " + name + ".", shortText: "Nietos de " + name + "." }
+    ].filter(function (level) { return ancestorDepth === 3 || level.id !== "great-grandparents"; });
+    const levelById = new Map();
+    const y = {};
+    levels.forEach(function (level, index) {
+      level.top = index * C.levelHeight;
+      level.bottom = level.top + C.levelHeight;
+      levelById.set(level.id, level);
+      y[level.id] = level.top + C.nodeOffset;
+    });
+    function busY(levelId) { return levelById.get(levelId).top + C.busOffset; }
+
     const elements = [], groups = [];
     const occurrences = new Map(), nodes = new Map(), childrenIndex = new Map();
-    const bounds = { x1: Infinity, y1: 0, x2: -Infinity, y2: 1080 };
+    const bounds = { x1: Infinity, y1: 0, x2: -Infinity, y2: levels[levels.length - 1].bottom };
     let sequence = 0;
 
     data.people.forEach(function (person) {
@@ -143,33 +171,47 @@
     const primaryIndex = fullSiblings.findIndex(function (person) { return person.id === primary.id; });
     const centralIds = new Set(fullSiblings.map(function (person) { return person.id; }));
     const siblingNodes = fullSiblings.map(function (person, index) {
-      return addPerson(person, (index - primaryIndex) * C.pitch, C.primaryY,
+      return addPerson(person, (index - primaryIndex) * C.pitch, y.siblings,
         person.id === primary.id ? "primary" : "sibling", "siblings",
         person.id === primary.id ? "Persona principal" : "Hermano/a");
     });
     const primaryNodeId = siblingNodes[primaryIndex];
 
-    function addAncestry(parentId, x, side) {
-      const parent = people.get(parentId);
-      if (!parent) return null;
-      const parentNode = addPerson(parent, x, C.parentY, "parent", "parents", side === "paternal" ? "Padre" : "Madre");
-      const ancestors = [
-        { person: people.get(parent.fatherId), x: x - 95, relation: "Abuelo" },
-        { person: people.get(parent.motherId), x: x + 95, relation: "Abuela" }
-      ];
-      const ancestorNodes = ancestors.map(function (ancestor) {
-        return addPerson(ancestor.person, ancestor.x, C.grandparentY, "grandparent", "grandparents",
-          ancestor.relation + (side === "paternal" ? " por parte del padre" : " por parte de la madre"));
-      });
-      connectFamily(ancestorNodes, [parentNode], 198,
-        ancestors.filter(function (ancestor) { return ancestor.person; }).map(function (ancestor) { return ancestor.person.id; }));
-      return parentNode;
+    // Measure before positioning. Equal halves keep a descendant under the midpoint
+    // of their parents, reserving the missing parent's slot when ancestry is incomplete.
+    function ancestryWidth(personId, generation) {
+      const person = people.get(personId);
+      if (!person || generation === ancestorDepth) return C.pitch;
+      return 2 * Math.max(ancestryWidth(person.fatherId, generation + 1),
+        ancestryWidth(person.motherId, generation + 1));
     }
 
-    const fatherX = -190, motherX = 190;
-    const fatherNode = addAncestry(primary.fatherId, fatherX, "paternal");
-    const motherNode = addAncestry(primary.motherId, motherX, "maternal");
-    connectFamily([fatherNode, motherNode], siblingNodes, 378, [primary.fatherId, primary.motherId].filter(Boolean));
+    const ancestorLevels = [null, "parents", "grandparents", "great-grandparents"];
+    const ancestorRoles = [null, "parent", "grandparent", "great-grandparent"];
+    function addAncestor(personId, generation, x, width, side, isFather) {
+      const person = people.get(personId);
+      if (!person) return null;
+      const level = ancestorLevels[generation];
+      const title = isFather ? [null, "Padre", "Abuelo", "Bisabuelo"][generation] :
+        [null, "Madre", "Abuela", "Bisabuela"][generation];
+      const relation = title + (generation > 1 ? " por parte " + (side === "paternal" ? "del padre" : "de la madre") : "");
+      const nodeId = addPerson(person, x, y[level], ancestorRoles[generation], level, relation);
+      nodes.get(nodeId).data.generation = generation;
+      nodes.get(nodeId).data.ancestorSide = side;
+      if (generation < ancestorDepth) {
+        const father = addAncestor(person.fatherId, generation + 1, x - width / 4, width / 2, side, true);
+        const mother = addAncestor(person.motherId, generation + 1, x + width / 4, width / 2, side, false);
+        connectFamily([father, mother], [nodeId], busY(level),
+          [person.fatherId, person.motherId].filter(function (id) { return people.has(id); }));
+      }
+      return nodeId;
+    }
+
+    const ancestorWidth = ancestryWidth(primary.id, 0);
+    const fatherX = -ancestorWidth / 4, motherX = ancestorWidth / 4;
+    const fatherNode = addAncestor(primary.fatherId, 1, fatherX, ancestorWidth / 2, "paternal", true);
+    const motherNode = addAncestor(primary.motherId, 1, motherX, ancestorWidth / 2, "maternal", false);
+    connectFamily([fatherNode, motherNode], siblingNodes, busY("siblings"), [primary.fatherId, primary.motherId].filter(Boolean));
     const centralLeft = Math.min(-primaryIndex * C.pitch - C.personHalfWidth, fatherX - C.personHalfWidth);
     const centralRight = Math.max((fullSiblings.length - primaryIndex - 1) * C.pitch + C.personHalfWidth, motherX + C.personHalfWidth);
 
@@ -181,14 +223,14 @@
       families.forEach(function (family, index) {
         const left = right - familyWidth(family);
         const group = groupFor(family, kind, left, right, parentId, index);
-        const partnerNode = addPerson(family.partner, group.center, C.parentY, "parent-partner", "parents",
+        const partnerNode = addPerson(family.partner, group.center, y.parents, "parent-partner", "parents",
           "Otra pareja del " + (kind === "paternal" ? "padre" : "madre"), group.id);
         const childNodes = family.children.map(function (child, childIndex) {
-          return addPerson(child, left + C.personHalfWidth + childIndex * C.pitch, C.primaryY,
+          return addPerson(child, left + C.personHalfWidth + childIndex * C.pitch, y.siblings,
             "half-sibling", "siblings", "Medio hermano/a por parte " + (kind === "paternal" ? "del padre" : "de la madre"), group.id);
         });
         // The common parent is identified by the side and annotation, as in v5.
-        connectFamily([partnerNode], childNodes, 378, [parentId, family.partnerId].filter(Boolean));
+        connectFamily([partnerNode], childNodes, busY("siblings"), [parentId, family.partnerId].filter(Boolean));
         right = left - C.groupGap;
       });
     }
@@ -202,24 +244,24 @@
     descendantFamilies.forEach(function (family, index) {
       const left = right - familyWidth(family);
       const group = groupFor(family, "descendant", left, right, primary.id, index);
-      const partnerNode = addPerson(family.partner, group.center, C.partnerY, "partner", "partners", "Pareja de la persona principal", group.id);
+      const partnerNode = addPerson(family.partner, group.center, y.partners, "partner", "partners", "Pareja de la persona principal", group.id);
       const childNodes = family.children.map(function (child, childIndex) {
-        return addPerson(child, left + C.personHalfWidth + childIndex * C.pitch, C.childY, "child", "children", "Hijo/a", group.id);
+        return addPerson(child, left + C.personHalfWidth + childIndex * C.pitch, y.children, "child", "children", "Hijo/a", group.id);
       });
-      connectFamily([partnerNode], childNodes, 738, [primary.id, family.partnerId].filter(Boolean));
+      connectFamily([partnerNode], childNodes, busY("children"), [primary.id, family.partnerId].filter(Boolean));
       family.children.forEach(function (child, childIndex) {
         const grandchildren = childrenOf(child.id);
         maxGrandchildren = Math.max(maxGrandchildren, grandchildren.length);
         if (!grandchildren.length) return;
         const childNode = nodes.get(childNodes[childIndex]);
         const x = childNode.position.x, trunkX = x - 75;
-        let previous = junction(trunkX, C.childY);
+        let previous = junction(trunkX, y.children);
         edge(childNode.data.id, previous, false, [child.id], null, { "source-endpoint": "-26 0" });
         grandchildren.forEach(function (grandchild, grandchildIndex) {
-          const y = C.grandchildY + grandchildIndex * C.grandchildPitch;
-          const fork = junction(trunkX, y);
+          const grandchildY = y.grandchildren + grandchildIndex * C.grandchildPitch;
+          const fork = junction(trunkX, grandchildY);
           edge(previous, fork, false, [child.id]);
-          const grandchildNode = addPerson(grandchild, x, y, "grandchild", "grandchildren", "Nieto/a por " + child.name, group.id);
+          const grandchildNode = addPerson(grandchild, x, grandchildY, "grandchild", "grandchildren", "Nieto/a por " + child.name, group.id);
           edge(fork, grandchildNode, true, [child.id], grandchild.id);
           previous = fork;
         });
@@ -227,31 +269,19 @@
       right = left - C.groupGap;
     });
 
-    const name = primary.name.trim().split(/\s+/)[0];
-    const grandchildrenBottom = Math.max(1080, C.grandchildY + Math.max(0, maxGrandchildren - 1) * C.grandchildPitch + 100);
-    let levels = [
-      { id: "grandparents", top: 0, bottom: 180,
-        text: "Abuelos de " + name + ": paternos a la izquierda; maternos a la derecha.",
-        shortText: "Abuelos de " + name + ": paternos a la izquierda; maternos a la derecha." },
-      { id: "parents", top: 180, bottom: 360,
-        text: "Padres de " + name + " y sus respectivas parejas: padre y sus parejas a la izquierda; madre y sus parejas a la derecha.",
-        shortText: "Padres de " + name + " y sus parejas: padre a la izquierda; madre a la derecha." },
-      { id: "siblings", top: 360, bottom: 540,
-        text: name + " y sus hermanos al centro; medios hermanos paternos a la izquierda y maternos a la derecha.",
-        shortText: name + " y hermanos al centro; medios hermanos paternos a la izquierda; maternos a la derecha." },
-      { id: "partners", top: 540, bottom: 720, text: "Parejas de " + name + ".", shortText: "Parejas de " + name + "." },
-      { id: "children", top: 720, bottom: 900, text: "Hijos de " + name + ".", shortText: "Hijos de " + name + "." },
-      { id: "grandchildren", top: 900, bottom: grandchildrenBottom, text: "Nietos de " + name + ".", shortText: "Nietos de " + name + "." }
-    ];
-    if (!descendantFamilies.length) levels = levels.slice(0, 3);
-    else if (!maxGrandchildren) levels = levels.slice(0, 5);
+    const grandchildrenLevel = levelById.get("grandchildren");
+    grandchildrenLevel.bottom = Math.max(grandchildrenLevel.bottom,
+      y.grandchildren + Math.max(0, maxGrandchildren - 1) * C.grandchildPitch + 100);
+    const lastLevel = !descendantFamilies.length ? "siblings" : !maxGrandchildren ? "children" : "grandchildren";
+    levels.splice(levels.findIndex(function (level) { return level.id === lastLevel; }) + 1);
     bounds.y1 = 0;
     bounds.y2 = levels[levels.length - 1].bottom;
     return {
       elements: elements, levels: levels, bounds: bounds, groups: groups,
-      primaryId: primary.id, primaryNodeId: primaryNodeId,
+      primaryId: primary.id, primaryNodeId: primaryNodeId, ancestorDepth: ancestorDepth,
       stats: {
         people: elements.filter(function (element) { return element.data.kind === "person"; }).length,
+        greatGrandparents: elements.filter(function (element) { return element.data.role === "great-grandparent"; }).length,
         families: groups.length, siblings: fullSiblings.length - 1,
         halfSiblings: elements.filter(function (element) { return element.data.role === "half-sibling"; }).length,
         children: childrenOf(primary.id).length,

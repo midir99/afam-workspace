@@ -19,6 +19,12 @@
         <h1 id="person-name">Jorge Alarcón Álvarez</h1>
       </div>
       <nav class="controls" aria-label="Controles del árbol">
+        <label class="ancestry-control" for="ancestor-depth">Ascendencia
+          <select id="ancestor-depth">
+            <option value="2">Hasta abuelos</option>
+            <option value="3" selected>Hasta bisabuelos</option>
+          </select>
+        </label>
         <button id="zoom-out" type="button" aria-label="Alejar" title="Alejar">−</button>
         <output id="zoom-level" aria-label="Nivel de acercamiento">100 %</output>
         <button id="zoom-in" type="button" aria-label="Acercar" title="Acercar">+</button>
@@ -29,7 +35,7 @@
 
     <main class="tree-area">
       <svg id="level-background" class="level-background" aria-hidden="true"></svg>
-      <div id="tree" role="img" aria-label="Árbol genealógico de ejemplo con abuelos, padres, hermanos, medios hermanos, parejas, hijos y nietos."></div>
+      <div id="tree" role="img" aria-label="Árbol genealógico de ejemplo con ascendencia, hermanos, medios hermanos, parejas, hijos y nietos."></div>
       <svg id="level-labels" class="level-annotations" role="img" aria-label="Anotaciones de los niveles de parentesco respecto de la persona principal"></svg>
       <p id="load-error" class="load-error" role="alert" hidden></p>
       <noscript>Activa JavaScript para ver el árbol genealógico.</noscript>
