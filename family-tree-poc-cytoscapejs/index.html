@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Prueba visual del árbol genealógico de San Andrés de la Cal.">
+    <title>Árbol genealógico · San Andrés de la Cal</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="vendor/cytoscape.min.js"></script>
+    <script defer src="tree-data.js"></script>
+    <script defer src="tree-layout.js"></script>
+    <script defer src="level-annotations.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="heading">
+        <p class="eyebrow">San Andrés de la Cal · Árbol genealógico</p>
+        <h1 id="person-name">Jorge Alarcón Álvarez</h1>
+      </div>
+      <nav class="controls" aria-label="Controles del árbol">
+        <button id="zoom-out" type="button" aria-label="Alejar" title="Alejar">−</button>
+        <output id="zoom-level" aria-label="Nivel de acercamiento">100 %</output>
+        <button id="zoom-in" type="button" aria-label="Acercar" title="Acercar">+</button>
+        <button id="fit-tree" class="fit-button" type="button">Ver todo</button>
+        <button id="focus-person" class="fit-button" type="button">Centrar</button>
+      </nav>
+    </header>
+
+    <main class="tree-area">
+      <svg id="level-background" class="level-background" aria-hidden="true"></svg>
+      <div id="tree" role="img" aria-label="Árbol genealógico de ejemplo con abuelos, padres, hermanos, medios hermanos, parejas, hijos y nietos."></div>
+      <svg id="level-labels" class="level-annotations" role="img" aria-label="Anotaciones de los niveles de parentesco respecto de la persona principal"></svg>
+      <p id="load-error" class="load-error" role="alert" hidden></p>
+      <noscript>Activa JavaScript para ver el árbol genealógico.</noscript>
+    </main>
+
+    <footer class="caption">
+      <p><span class="primary-marker" aria-hidden="true"></span> Persona principal <span class="separator">·</span> Flechas: descendencia de sangre <span class="separator">·</span> Datos de ejemplo</p>
+      <p>Arrastra el fondo para desplazarte. Usa la rueda o los controles para acercarte.</p>
+    </footer>
+  </body>
+</html>
