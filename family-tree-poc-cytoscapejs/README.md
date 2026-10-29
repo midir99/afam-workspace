@@ -2,7 +2,7 @@
 
 Abre `index.html` en un navegador. Todos los recursos están incluidos en esta carpeta: no necesita instalación, compilación ni conexión a Internet.
 
-Arrastra el fondo para desplazarte y utiliza la rueda, el gesto de pinza o los controles para acercarte. «Ver todo» encuadra el árbol y «Centrar» vuelve a la persona principal al 100 %. En pantallas pequeñas la vista comienza centrada en ella.
+Al abrir la página, la vista comienza al 100 % y centrada en la persona principal en todas las pantallas. Después puedes arrastrar el fondo para desplazarte y utilizar la rueda, el gesto de pinza o los controles para acercarte. «Ver todo» encuadra el árbol y «Centrar» vuelve a la persona principal al 100 %.
 
 El selector «Ascendencia» permite mostrar hasta abuelos o bisabuelos, conservando el zoom y la posición de la persona principal en pantalla. La vista inicial incluye ocho bisabuelos de ejemplo.
 

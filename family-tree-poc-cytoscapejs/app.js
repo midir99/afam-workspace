@@ -132,7 +132,7 @@
       const position = cy.getElementById(scene.primaryNodeId).position();
       cy.viewport({ zoom: 1, pan: {
         x: cy.width() / 2 - position.x,
-        y: cy.height() * 0.42 - position.y
+        y: cy.height() / 2 - position.y
       } });
     }
 
@@ -158,10 +158,7 @@
     }
 
     function initialView() {
-      fitTree();
-      // En pantallas pequeñas, empezar cerca de la persona principal permite leer.
-      // «Ver todo» sigue ofreciendo la vista general completa.
-      if (cy.width() < 640) focusPerson();
+      focusPerson();
     }
 
     zoomIn.addEventListener("click", function () { changeZoom(1.25); });
