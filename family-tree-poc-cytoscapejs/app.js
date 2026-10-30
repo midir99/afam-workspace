@@ -23,6 +23,17 @@
   }
 
   try {
+    const labelStyle = window.FamilyTreeLayout.labelStyle;
+    const textContext = document.createElement("canvas").getContext("2d");
+    const textWidths = new Map();
+    function measureLabel(text, isPrimary) {
+      const key = (isPrimary ? "600|" : "400|") + text;
+      if (!textWidths.has(key)) {
+        textContext.font = (isPrimary ? "600 " : "400 ") + labelStyle.fontSize + "px " + labelStyle.fontFamily;
+        textWidths.set(key, textContext.measureText(text).width);
+      }
+      return textWidths.get(key);
+    }
     function addAvatars(scene) {
       scene.elements.forEach(function (element) {
         if (element.data.kind === "person") {
@@ -31,7 +42,8 @@
       });
       return scene;
     }
-    let scene = addAvatars(window.FamilyTreeLayout.build(window.FamilyTreeDemoData));
+    let scene = addAvatars(window.FamilyTreeLayout.build(window.FamilyTreeDemoData, undefined,
+      { measureText: measureLabel }));
 
     const primary = window.FamilyTreeDemoData.people.find(function (person) {
       return person.id === window.FamilyTreeDemoData.primaryId;
@@ -66,11 +78,11 @@
             "background-fit": "contain",
             "border-width": 1.5, "border-color": "#7d8b76",
             label: "data(label)", color: "#303a34",
-            "font-family": '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-            "font-size": 15, "font-weight": 400,
-            "text-wrap": "wrap", "text-max-width": 132,
+            "font-family": labelStyle.fontFamily,
+            "font-size": labelStyle.fontSize, "font-weight": 400,
+            "text-wrap": "wrap", "text-max-width": labelStyle.maxWidth,
             "text-valign": "bottom", "text-halign": "center",
-            "text-margin-y": 10, "line-height": 1.25,
+            "text-margin-y": labelStyle.marginY, "line-height": labelStyle.lineHeight,
             "z-index": 5, "z-compound-depth": "top"
           }
         },
@@ -153,7 +165,7 @@
       const zoom = cy.zoom();
       const reference = cy.getElementById(scene.primaryNodeId).renderedPosition();
       const next = addAvatars(window.FamilyTreeLayout.build(window.FamilyTreeDemoData, scene.primaryId,
-        { ancestorDepth: depth }));
+        { ancestorDepth: depth, measureText: measureLabel }));
       annotations.destroy();
       cy.batch(function () {
         cy.elements().remove();

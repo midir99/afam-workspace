@@ -36,7 +36,8 @@ function checkLayout(primary, ancestorDepth) {
     check(Number.isFinite(node.position.x) && Number.isFinite(node.position.y), 'Coordenadas finitas');
     const level = scene.levels.find(l => l.id === node.data.level);
     const padding = node.data.parent ? 6 : 0;
-    check(level && node.position.y - 36 - padding >= level.top && node.position.y + 90 + padding <= level.bottom, 'Persona y fondo dentro de su franja');
+    check(level && node.position.y - node.data.topExtent - padding >= level.top && node.position.y + node.data.bottomExtent + padding <= level.bottom, 'Persona, años y fondo dentro de su franja');
+    check(/\n\d{4}(?:-\d{4})?$/.test(node.data.label), 'Años en una línea propia después del nombre');
     if (node.data.parent) check(byId.get(node.data.parent).data.kind === 'color-card', 'Solo se permiten contenedores individuales de color');
     if (!node.data.generation) continue;
     check(node.data.generation <= ancestorDepth, 'Ascendencia limitada a la profundidad solicitada');
@@ -49,14 +50,20 @@ function checkLayout(primary, ancestorDepth) {
     }
   }
   for (let i = 0; i < persons.length; i++) for (let j = i + 1; j < persons.length; j++) {
-    const a = persons[i].position, b = persons[j].position;
-    const extra = (persons[i].data.parent ? 6 : 0) + (persons[j].data.parent ? 6 : 0);
-    check(Math.abs(a.x - b.x) >= 140 + extra || Math.abs(a.y - b.y) >= 126 + extra, 'Espacio suficiente entre personas, nombres y fondos');
+    const na = persons[i], nb = persons[j], a = na.position, b = nb.position;
+    const pa = na.data.parent ? 6 : 0, pb = nb.data.parent ? 6 : 0;
+    const verticallyApart = a.y + na.data.bottomExtent + pa <= b.y - nb.data.topExtent - pb ||
+      b.y + nb.data.bottomExtent + pb <= a.y - na.data.topExtent - pa;
+    check(Math.abs(a.x - b.x) >= 140 + pa + pb || verticallyApart, 'Espacio suficiente entre personas, nombres, años y fondos');
   }
   for (const edge of edges) {
     check(byId.has(edge.data.source) && byId.has(edge.data.target), 'Extremos de conexiones válidos');
+    const source = byId.get(edge.data.source), target = byId.get(edge.data.target);
+    if (source.data.kind === 'person' && edge.style && edge.style['source-endpoint'].startsWith('0 ')) {
+      check(source.data.sourceOffset > source.data.bottomExtent, 'Conexión inicia debajo de los años');
+      check(target.position.y > source.position.y + source.data.sourceOffset, 'La ruta queda debajo de la etiqueta completa');
+    }
     if (!edge.classes.includes('arrow')) continue;
-    const target = byId.get(edge.data.target);
     const child = people.get(target.data.personId);
     check(target.data.kind === 'person' && target.data.personId === edge.data.childId, 'Flecha hacia una persona hija');
     check(edge.data.parentIds.length && edge.data.parentIds.every(id => id === child.fatherId || id === child.motherId), 'Flechas solo de filiación biológica');
@@ -68,7 +75,8 @@ function checkLayout(primary, ancestorDepth) {
   check(central.every((n,i) => i === 0 || central[i-1].data.birthDate <= n.data.birthDate), 'Hermanos centrales por edad');
   for (const kind of ['paternal', 'maternal', 'descendant']) {
     const groups = scene.groups.filter(g => g.familyKind === kind);
-    check(groups.every((g,i) => i === 0 || (groups[i-1].firstBirthDate <= g.firstBirthDate && groups[i-1].center > g.center)), 'Parejas de derecha a izquierda por primer hijo');
+    check(groups.every((g,i) => i === 0 || (groups[i-1].firstBirthDate <= g.firstBirthDate && groups[i-1].center < g.center)),
+      'Parejas de izquierda a derecha por el nacimiento del primer hijo común');
     for (const group of groups) {
       const children = group.childIds.map(byPerson);
       check(children.every((n,i) => i === 0 || children[i-1].position.x < n.position.x), 'Hijos de cada pareja de mayor a menor');
@@ -117,13 +125,21 @@ for (const primary of data.people) {
 }
 
 const scene = build(data);
+const parentRow = scene.elements.filter(e=>e.data.kind==='person' && e.data.level==='parents').sort((a,b)=>a.position.x-b.position.x);
+assert.deepEqual(Array.from(parentRow,n=>n.data.personId),['teresa','elena','jorge-padre','leticia','rafael','manuel'],'Orden acordado de parejas paternas y maternas');
+const halfSiblings = scene.elements.filter(e=>e.data.role==='half-sibling').sort((a,b)=>a.position.x-b.position.x);
+assert.deepEqual(Array.from(halfSiblings,n=>n.data.personId),['andres','beatriz','diego','adriana','ana','luis','rosa','hugo'],'Los medios hermanos acompañan a su otro progenitor en el nuevo orden');
+const ownPartners = scene.elements.filter(e=>e.data.role==='partner').sort((a,b)=>a.position.x-b.position.x);
+assert.deepEqual(Array.from(ownPartners,n=>n.data.personId),['frida','maria'],'Orden de las parejas de la persona principal');
+const childRow = scene.elements.filter(e=>e.data.role==='child').sort((a,b)=>a.position.x-b.position.x);
+assert.deepEqual(Array.from(childRow,n=>n.data.personId),['porfirio-hijo','juana','mario-hijo','fernanda'],'Los hijos acompañan el orden de las parejas');
 assert.equal(scene.stats.people, 54);
 assert.equal(scene.stats.greatGrandparents, 8);
 assert.equal(scene.stats.greatGrandchildren, 11);
 assert.equal(scene.elements.filter(e=>e.data.kind==='color-card').length,17);
 assert.equal(scene.levels.length, 8);
 assert.deepEqual(Array.from(scene.levels, l => l.id), ['great-grandparents','grandparents','parents','siblings','partners','children','grandchildren','great-grandchildren']);
-assert.deepEqual(Array.from(scene.greatGrandchildGroups,g=>g.progenitorId),['isabel','josefina','julian','jose','julieta','ramon']);
+assert.deepEqual(Array.from(scene.greatGrandchildGroups,g=>g.progenitorId),['jose','julieta','ramon','isabel','josefina','julian'],'Columnas de bisnietos después de reordenar las ramas');
 assert(!scene.elements.find(e=>e.data.personId==='enedina').data.parent);
 assert(!scene.elements.find(e=>e.data.personId==='juan').data.parent);
 const siblingLevel = scene.levels.find(l => l.id === 'siblings');
@@ -137,7 +153,7 @@ assert.equal(shallow.stats.people, 46);
 assert.equal(shallow.stats.greatGrandparents, 0);
 assert.equal(shallow.levels.length, 7);
 assert.deepEqual(Array.from(scene.greatGrandchildGroups,g=>g.color),Array.from(shallow.greatGrandchildGroups,g=>g.color),'Colores estables al cambiar ascendencia');
-assert.equal(scene.elements.find(e => e.data.role === 'primary').position.y - shallow.elements.find(e => e.data.role === 'primary').position.y, 180);
+assert.equal(scene.elements.find(e => e.data.role === 'primary').position.y - shallow.elements.find(e => e.data.role === 'primary').position.y, scene.geometry.levelHeight);
 
 for (const grandparent of scene.elements.filter(e => e.data.role === 'grandparent')) {
   const arrow = scene.elements.find(e => e.classes && e.classes.includes('arrow') && e.data.childId === grandparent.data.personId);
@@ -172,4 +188,23 @@ const extended = {...data,people:[...data.people,{id:'extra-juan',name:'Ejemplo 
 const extendedScene = build(extended);
 assert.equal(extendedScene.greatGrandchildGroups.length,8);
 assert.equal(new Set(extendedScene.greatGrandchildGroups.map(g=>g.color)).size,8);
+
+const lifeYearsFor = context.window.FamilyTreeLayout.lifeYearsFor;
+assert.equal(lifeYearsFor({birthDate:'1999-04-03',deathDate:'2021-11-09'}),'1999-2021');
+assert.equal(lifeYearsFor({birthDate:'1999-04-03'}),'1999');
+assert.equal(lifeYearsFor({birthDate:'1999',deathDate:'2021'}),'1999-2021');
+assert.equal(lifeYearsFor({birthDate:'1999-01-01T00:00:00+14:00'}),'1999','El huso horario no cambia el año');
+assert.equal(lifeYearsFor({deathDate:'2021-04-03'}),'?-2021');
+assert.equal(lifeYearsFor({}),'');
+assert(scene.elements.find(e=>e.data.personId==='severo').data.label.endsWith('\n1875-1952'));
+assert(scene.elements.find(e=>e.data.personId==='jorge').data.label.endsWith('\n1962'));
+
+const longNameData = {...data,people:data.people.map(p=>p.id==='jorge'?{...p,name:'Jorge Alarcón Álvarez de los Santos Hernández'}:p)};
+const longScene = build(longNameData,undefined,{measureText:text=>text.length*8});
+assert(longScene.geometry.levelHeight>scene.geometry.levelHeight,'La franja crece para un nombre largo con años');
+assert(longScene.geometry.columnPitch>scene.geometry.columnPitch,'Las columnas reservan la altura adicional');
+for(const n of longScene.elements.filter(e=>e.data.kind==='person')) {
+  const l=longScene.levels.find(l=>l.id===n.data.level),pad=n.data.parent?6:0;
+  assert(n.position.y-n.data.topExtent-pad>=l.top && n.position.y+n.data.bottomExtent+pad<=l.bottom);
+}
 console.log('Layout correcto: ' + assertions + ' comprobaciones, ' + data.people.length + ' personas como raíz a dos profundidades; ascendencia completa e incompleta.');

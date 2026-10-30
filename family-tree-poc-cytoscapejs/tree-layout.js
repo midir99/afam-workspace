@@ -3,7 +3,12 @@
 
   const C = {
     pitch: 155, groupGap: 80, personHalfWidth: 70,
-    levelHeight: 180, nodeOffset: 85, busOffset: 18, grandchildPitch: 140, cardPadding: 6
+    levelHeight: 180, nodeOffset: 85, busOffset: 18, cardPadding: 6, verticalGap: 16
+  };
+
+  const LABEL_STYLE = {
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontSize: 15, lineHeight: 1.25, maxWidth: 132, marginY: 10
   };
 
   const FAMILY_COLORS = ["#e1d4ec", "#d1e8d0", "#ffefc7", "#f9cccc", "#d5e5ff", "#ffe4cd"];
@@ -13,13 +18,28 @@
     return FAMILY_COLORS[index] || "hsl(" + ((index * 137.508) % 360).toFixed(2) + ", 55%, 85%)";
   }
 
-  function labelFor(name) {
+  function yearOf(date) {
+    const match = String(date || "").match(/^(\d{4})(?:-|$)/);
+    return match ? match[1] : "";
+  }
+
+  function lifeYearsFor(person) {
+    const birth = yearOf(person.birthDate);
+    const death = yearOf(person.deathDate);
+    return death ? (birth || "?") + "-" + death : birth;
+  }
+
+  function labelFor(person, isPrimary, measureText) {
     const lines = [""];
-    String(name).split(/\s+/).forEach(function (word) {
+    String(person.name || "").trim().split(/\s+/).forEach(function (word) {
       const last = lines.length - 1;
-      if (lines[last] && (lines[last] + " " + word).length > 18) lines.push(word);
+      const candidate = lines[last] + (lines[last] ? " " : "") + word;
+      const tooWide = measureText ? measureText(candidate, isPrimary) > LABEL_STYLE.maxWidth - 2 : candidate.length > 18;
+      if (lines[last] && tooWide) lines.push(word);
       else lines[last] += (lines[last] ? " " : "") + word;
     });
+    const years = lifeYearsFor(person);
+    if (years) lines.push(years);
     return lines.join("\n");
   }
 
@@ -31,6 +51,27 @@
     const people = new Map(data.people.map(function (person) { return [person.id, person]; }));
     const primary = people.get(selectedId || data.primaryId);
     if (!primary) throw new Error("No existe la persona principal.");
+    const measureText = options && options.measureText;
+    const textBlocks = new Map();
+    function textBlock(person, isPrimary) {
+      const key = person.id + (isPrimary ? ":primary" : ":person");
+      if (!textBlocks.has(key)) {
+        const label = labelFor(person, isPrimary, measureText);
+        const bottom = Math.ceil((isPrimary ? 33 : 27) + LABEL_STYLE.marginY +
+          label.split("\n").length * LABEL_STYLE.fontSize * LABEL_STYLE.lineHeight + 3);
+        textBlocks.set(key, { label: label, top: isPrimary ? 36 : 30, bottom: bottom });
+      }
+      return textBlocks.get(key);
+    }
+    // Reserve space for the complete label, including the years and card padding.
+    // In the browser, native canvas text metrics use the same font as Cytoscape.
+    let maxBottom = 0;
+    data.people.forEach(function (person) {
+      maxBottom = Math.max(maxBottom, textBlock(person, person.id === primary.id).bottom);
+    });
+    const levelHeight = Math.ceil(Math.max(C.levelHeight,
+      C.nodeOffset + maxBottom + C.cardPadding + C.verticalGap) / 10) * 10;
+    const columnPitch = Math.ceil((36 + maxBottom + 2 * C.cardPadding + C.verticalGap) / 10) * 10;
     const ancestorDepth = options && options.ancestorDepth === 2 ? 2 : 3;
     const name = primary.name.trim().split(/\s+/)[0];
     const levels = [
@@ -55,8 +96,8 @@
     const levelById = new Map();
     const y = {};
     levels.forEach(function (level, index) {
-      level.top = index * C.levelHeight;
-      level.bottom = level.top + C.levelHeight;
+      level.top = index * levelHeight;
+      level.bottom = level.top + levelHeight;
       levelById.set(level.id, level);
       y[level.id] = level.top + C.nodeOffset;
     });
@@ -79,8 +120,8 @@
       const radius = person ? C.personHalfWidth : 1;
       bounds.x1 = Math.min(bounds.x1, x - radius);
       bounds.x2 = Math.max(bounds.x2, x + radius);
-      bounds.y1 = Math.min(bounds.y1, y - (person ? 36 : 1));
-      bounds.y2 = Math.max(bounds.y2, y + (person ? 90 : 1));
+      bounds.y1 = Math.min(bounds.y1, y - (person ? person.topExtent : 1));
+      bounds.y2 = Math.max(bounds.y2, y + (person ? person.bottomExtent : 1));
     }
 
     function addPerson(person, x, y, role, level, relation, familyId) {
@@ -88,20 +129,21 @@
       const count = occurrences.get(person.id) || 0;
       occurrences.set(person.id, count + 1);
       const id = person.id + (count ? "--occurrence-" + count : "");
-      const label = labelFor(person.name);
+      const block = textBlock(person, role === "primary");
       const node = {
         data: {
-          id: id, personId: person.id, kind: "person", name: person.name, label: label,
+          id: id, personId: person.id, kind: "person", name: person.name, label: block.label,
+          lifeYears: lifeYearsFor(person), deathDate: person.deathDate,
           initials: person.name.split(/\s+/).slice(0, 2).map(function (word) { return word[0]; }).join(""),
           role: role, level: level, relation: relation, birthDate: person.birthDate,
           fatherId: person.fatherId, motherId: person.motherId, familyId: familyId || "",
-          sourceOffset: Math.max(80, 26 + 10 + label.split("\n").length * 18.75 + 8)
+          topExtent: block.top, bottomExtent: block.bottom, sourceOffset: block.bottom + 8
         },
         position: { x: x, y: y }
       };
       elements.push(node);
       nodes.set(id, node);
-      include(x, y, true);
+      include(x, y, node.data);
       return id;
     }
 
@@ -119,6 +161,8 @@
       // Reserve their padding in the model bounds used by the overview.
       bounds.x1 = Math.min(bounds.x1, node.position.x - C.personHalfWidth - C.cardPadding);
       bounds.x2 = Math.max(bounds.x2, node.position.x + C.personHalfWidth + C.cardPadding);
+      bounds.y1 = Math.min(bounds.y1, node.position.y - node.data.topExtent - C.cardPadding);
+      bounds.y2 = Math.max(bounds.y2, node.position.y + node.data.bottomExtent + C.cardPadding);
     }
 
     function junction(x, y) {
@@ -244,9 +288,10 @@
       if (!parentId || !people.has(parentId)) return;
       const families = familiesOf(parentId, centralIds);
       const total = families.reduce(function (sum, family) { return sum + familyWidth(family); }, 0) + Math.max(0, families.length - 1) * C.groupGap;
-      let right = kind === "paternal" ? centralLeft - C.groupGap : centralRight + C.groupGap + total;
+      // Read chronological groups left to right on either side of the central family.
+      let left = kind === "paternal" ? centralLeft - C.groupGap - total : centralRight + C.groupGap;
       families.forEach(function (family, index) {
-        const left = right - familyWidth(family);
+        const right = left + familyWidth(family);
         const group = groupFor(family, kind, left, right, parentId, index);
         const partnerNode = addPerson(family.partner, group.center, y.parents, "parent-partner", "parents",
           "Otra pareja del " + (kind === "paternal" ? "padre" : "madre"), group.id);
@@ -256,7 +301,7 @@
         });
         // The common parent is identified by the side and annotation, as in v5.
         connectFamily([partnerNode], childNodes, busY("siblings"), [parentId, family.partnerId].filter(Boolean));
-        right = left - C.groupGap;
+        left = right + C.groupGap;
       });
     }
     addHalfSiblingFamilies(primary.fatherId, "paternal");
@@ -264,11 +309,11 @@
 
     const descendantFamilies = familiesOf(primary.id);
     const descendantWidth = descendantFamilies.reduce(function (sum, family) { return sum + familyWidth(family); }, 0) + Math.max(0, descendantFamilies.length - 1) * C.groupGap;
-    let right = descendantWidth / 2;
+    let left = -descendantWidth / 2;
     let maxGrandchildren = 0;
     const grandchildEntries = [];
     descendantFamilies.forEach(function (family, index) {
-      const left = right - familyWidth(family);
+      const right = left + familyWidth(family);
       const group = groupFor(family, "descendant", left, right, primary.id, index);
       const partnerNode = addPerson(family.partner, group.center, y.partners, "partner", "partners", "Pareja de la persona principal", group.id);
       const childNodes = family.children.map(function (child, childIndex) {
@@ -284,7 +329,7 @@
         let previous = junction(trunkX, y.children);
         edge(childNode.data.id, previous, false, [child.id], null, { "source-endpoint": "-26 0" });
         grandchildren.forEach(function (grandchild, grandchildIndex) {
-          const grandchildY = y.grandchildren + grandchildIndex * C.grandchildPitch;
+          const grandchildY = y.grandchildren + grandchildIndex * columnPitch;
           const fork = junction(trunkX, grandchildY);
           edge(previous, fork, false, [child.id]);
           const grandchildNode = addPerson(grandchild, x, grandchildY, "grandchild", "grandchildren", "Nieto/a por " + child.name, group.id);
@@ -293,15 +338,15 @@
           previous = fork;
         });
       });
-      right = left - C.groupGap;
+      left = right + C.groupGap;
     });
 
     const grandchildrenLevel = levelById.get("grandchildren");
     grandchildrenLevel.bottom = Math.max(grandchildrenLevel.bottom,
-      y.grandchildren + Math.max(0, maxGrandchildren - 1) * C.grandchildPitch + 100);
+      y.grandchildren + Math.max(0, maxGrandchildren - 1) * columnPitch + maxBottom + C.cardPadding + C.verticalGap);
 
-    // Families are built right to left above. Read the finished diagram left to
-    // right, then top to bottom, to obtain the order of great-grandchild columns.
+    // Read the finished diagram left to right, then top to bottom, to obtain
+    // the order of great-grandchild columns.
     const fertileGrandchildren = grandchildEntries.slice().sort(function (a, b) {
       return a.parentX - b.parentX || a.y - b.y || a.nodeId.localeCompare(b.nodeId);
     }).map(function (entry) {
@@ -319,7 +364,7 @@
         color: color, x: x, childIds: [], childNodeIds: [] };
       addColorCard(entry.nodeId, color, entry.nodeId);
       entry.children.forEach(function (child, childIndex) {
-        const nodeId = addPerson(child, x, y["great-grandchildren"] + childIndex * C.grandchildPitch,
+        const nodeId = addPerson(child, x, y["great-grandchildren"] + childIndex * columnPitch,
           "great-grandchild", "great-grandchildren", "Bisnieto/a por " + entry.person.name, nodes.get(entry.nodeId).data.familyId);
         addColorCard(nodeId, color, entry.nodeId);
         group.childIds.push(child.id);
@@ -328,8 +373,8 @@
       greatGrandchildGroups.push(group);
       maxGreatGrandchildren = Math.max(maxGreatGrandchildren, entry.children.length);
     });
-    greatGrandchildrenLevel.bottom = Math.max(greatGrandchildrenLevel.top + C.levelHeight,
-      y["great-grandchildren"] + Math.max(0, maxGreatGrandchildren - 1) * C.grandchildPitch + 100);
+    greatGrandchildrenLevel.bottom = Math.max(greatGrandchildrenLevel.top + levelHeight,
+      y["great-grandchildren"] + Math.max(0, maxGreatGrandchildren - 1) * columnPitch + maxBottom + C.cardPadding + C.verticalGap);
     const lastLevel = !descendantFamilies.length ? "siblings" : !maxGrandchildren ? "children" :
       !maxGreatGrandchildren ? "grandchildren" : "great-grandchildren";
     levels.splice(levels.findIndex(function (level) { return level.id === lastLevel; }) + 1);
@@ -338,6 +383,7 @@
     return {
       elements: cards.concat(elements), levels: levels, bounds: bounds, groups: groups,
       greatGrandchildGroups: greatGrandchildGroups,
+      geometry: { levelHeight: levelHeight, columnPitch: columnPitch },
       primaryId: primary.id, primaryNodeId: primaryNodeId, ancestorDepth: ancestorDepth,
       stats: {
         people: elements.filter(function (element) { return element.data.kind === "person"; }).length,
@@ -351,5 +397,5 @@
     };
   }
 
-  window.FamilyTreeLayout = { build: build };
+  window.FamilyTreeLayout = { build: build, lifeYearsFor: lifeYearsFor, labelStyle: LABEL_STYLE };
 }());
