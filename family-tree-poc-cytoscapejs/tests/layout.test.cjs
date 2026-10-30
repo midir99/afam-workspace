@@ -22,12 +22,22 @@ function checkLayout(primary, ancestorDepth) {
   check(new Set(scene.elements.map(e => e.data.id)).size === scene.elements.length, 'IDs únicos');
   check(persons.filter(n => n.data.role === 'primary').length === 1, 'Una persona principal');
   check(byId.get(scene.primaryNodeId).position.x === 0, 'Persona principal alineada con la unión de sus padres');
-  check(!nodes.some(n => n.data.parent || n.data.kind === 'family' || n.data.kind === 'spacer'), 'Sin rectángulos familiares o guías como nodos');
+  check(!nodes.some(n => n.data.kind === 'family' || n.data.kind === 'spacer'), 'Sin rectángulos de agrupación familiar');
+  const cards = nodes.filter(n => n.data.kind === 'color-card');
+  for (const card of cards) {
+    const contents = persons.filter(n => n.data.parent === card.data.id);
+    check(contents.length === 1 && contents[0].data.id === card.data.personNodeId, 'Cada contenedor tiene una sola persona');
+    check(contents[0].data.level === card.data.level && contents[0].data.familyColor === card.data.familyColor, 'Contenedor y persona comparten nivel y color');
+    check(!card.data.personId && !card.data.parent, 'El fondo es un contenedor visual independiente de los parentescos');
+  }
+  for (let i = 1; i < scene.levels.length; i++) check(scene.levels[i].top === scene.levels[i-1].bottom, 'Franjas consecutivas sin superposición');
   check(!scene.levels.some(l => l.text.includes('ambos padres')), 'Anotación de hermanos respeta el texto acordado');
   for (const node of persons) {
     check(Number.isFinite(node.position.x) && Number.isFinite(node.position.y), 'Coordenadas finitas');
     const level = scene.levels.find(l => l.id === node.data.level);
-    check(level && node.position.y - 36 >= level.top && node.position.y + 90 <= level.bottom, 'Persona dentro de su franja');
+    const padding = node.data.parent ? 6 : 0;
+    check(level && node.position.y - 36 - padding >= level.top && node.position.y + 90 + padding <= level.bottom, 'Persona y fondo dentro de su franja');
+    if (node.data.parent) check(byId.get(node.data.parent).data.kind === 'color-card', 'Solo se permiten contenedores individuales de color');
     if (!node.data.generation) continue;
     check(node.data.generation <= ancestorDepth, 'Ascendencia limitada a la profundidad solicitada');
     check(node.data.ancestorSide === 'paternal' ? node.position.x < 0 : node.position.x > 0, 'Antepasados en el lado correcto');
@@ -40,7 +50,8 @@ function checkLayout(primary, ancestorDepth) {
   }
   for (let i = 0; i < persons.length; i++) for (let j = i + 1; j < persons.length; j++) {
     const a = persons[i].position, b = persons[j].position;
-    check(Math.abs(a.x - b.x) >= 140 || Math.abs(a.y - b.y) >= 126, 'Espacio suficiente entre personas y sus nombres');
+    const extra = (persons[i].data.parent ? 6 : 0) + (persons[j].data.parent ? 6 : 0);
+    check(Math.abs(a.x - b.x) >= 140 + extra || Math.abs(a.y - b.y) >= 126 + extra, 'Espacio suficiente entre personas, nombres y fondos');
   }
   for (const edge of edges) {
     check(byId.has(edge.data.source) && byId.has(edge.data.target), 'Extremos de conexiones válidos');
@@ -72,6 +83,30 @@ function checkLayout(primary, ancestorDepth) {
     check(actual.every((n,i) => i === 0 || actual[i-1].position.y < n.position.y), 'Nietos de mayor a menor de arriba abajo');
     for (const grandchild of actual) check(!edges.some(e => e.data.source === grandchild.data.id), 'Nietos sin formar cadenas generacionales');
   }
+  const expectedColumns = persons.filter(n => n.data.role === 'grandchild').sort((a,b) => a.position.x-b.position.x || a.position.y-b.position.y)
+    .filter(n => data.people.some(p => p.fatherId === n.data.personId || p.motherId === n.data.personId));
+  const columns = scene.greatGrandchildGroups;
+  assert.deepEqual(Array.from(columns,g=>g.progenitorNodeId),Array.from(expectedColumns,n=>n.data.id),'Columnas según la lectura visual de hijos y nietos');
+  check(new Set(columns.map(g=>g.color)).size === columns.length, 'Color diferente por nieto con hijos');
+  for (let i = 0; i < columns.length; i++) {
+    const group = columns[i];
+    const progenitor = byId.get(group.progenitorNodeId);
+    const expected = data.people.filter(p=>p.fatherId===group.progenitorId || p.motherId===group.progenitorId).sort((a,b)=>a.birthDate.localeCompare(b.birthDate));
+    assert.deepEqual(Array.from(group.childIds),Array.from(expected,p=>p.id),'Todos los hijos de cada nieto, de todas sus parejas');
+    check(i === 0 || columns[i-1].x < group.x, 'Columnas de bisnietos de izquierda a derecha');
+    check(progenitor.data.familyColor === group.color && progenitor.data.colorGroupId === progenitor.data.id, 'Nieto con hijos identificado por su color');
+    group.childNodeIds.forEach((id,index)=>{
+      const child = byId.get(id);
+      check(child.data.role === 'great-grandchild' && child.position.x === group.x, 'Bisnieto dentro de la columna de su progenitor');
+      check(child.data.familyColor === group.color && child.data.colorGroupId === progenitor.data.id, 'Bisnieto y progenitor comparten color');
+      check(index === 0 || byId.get(group.childNodeIds[index-1]).position.y < child.position.y, 'Bisnietos por edad de arriba abajo');
+      check(!edges.some(e=>e.data.source===id || e.data.target===id), 'Bisnietos relacionados mediante color, sin líneas');
+    });
+  }
+  if (columns.length) check(columns[0].x + columns[columns.length-1].x === 0,'Conjunto de columnas de bisnietos centrado');
+  for (const grandchild of persons.filter(n=>n.data.role==='grandchild')) {
+    check(Boolean(grandchild.data.parent) === columns.some(g=>g.progenitorNodeId===grandchild.data.id),'Solo los nietos con hijos reciben fondo');
+  }
   const children = persons.filter(n => n.data.role === 'child');
   if (!children.length) check(scene.levels[scene.levels.length-1].id === 'siblings', 'Sin hijos, termina en hermanos');
   const families = scene.groups.filter(g => g.familyKind === 'descendant');
@@ -82,20 +117,26 @@ for (const primary of data.people) {
 }
 
 const scene = build(data);
-assert.equal(scene.stats.people, 43);
+assert.equal(scene.stats.people, 54);
 assert.equal(scene.stats.greatGrandparents, 8);
-assert.equal(scene.levels.length, 7);
-assert.deepEqual(Array.from(scene.levels, l => l.id), ['great-grandparents','grandparents','parents','siblings','partners','children','grandchildren']);
+assert.equal(scene.stats.greatGrandchildren, 11);
+assert.equal(scene.elements.filter(e=>e.data.kind==='color-card').length,17);
+assert.equal(scene.levels.length, 8);
+assert.deepEqual(Array.from(scene.levels, l => l.id), ['great-grandparents','grandparents','parents','siblings','partners','children','grandchildren','great-grandchildren']);
+assert.deepEqual(Array.from(scene.greatGrandchildGroups,g=>g.progenitorId),['isabel','josefina','julian','jose','julieta','ramon']);
+assert(!scene.elements.find(e=>e.data.personId==='enedina').data.parent);
+assert(!scene.elements.find(e=>e.data.personId==='juan').data.parent);
 const siblingLevel = scene.levels.find(l => l.id === 'siblings');
 for (const text of [siblingLevel.text, siblingLevel.shortText]) {
-  check(text.includes('centro') && text.includes('medios hermanos') && text.includes('paternos') && text.includes('izquierda') && text.includes('maternos') && text.includes('derecha'),
+  check(text.includes('centro') && text.includes('medios hermanos') && text.includes('paternos') && (text.includes('izquierda') || text.includes('izq.')) && text.includes('maternos') && (text.includes('derecha') || text.includes('der.')),
     'Las notas compactas conservan la posición de hermanos y medios hermanos');
 }
 
 const shallow = build(data, data.primaryId, {ancestorDepth:2});
-assert.equal(shallow.stats.people, 35);
+assert.equal(shallow.stats.people, 46);
 assert.equal(shallow.stats.greatGrandparents, 0);
-assert.equal(shallow.levels.length, 6);
+assert.equal(shallow.levels.length, 7);
+assert.deepEqual(Array.from(scene.greatGrandchildGroups,g=>g.color),Array.from(shallow.greatGrandchildGroups,g=>g.color),'Colores estables al cambiar ascendencia');
 assert.equal(scene.elements.find(e => e.data.role === 'primary').position.y - shallow.elements.find(e => e.data.role === 'primary').position.y, 180);
 
 for (const grandparent of scene.elements.filter(e => e.data.role === 'grandparent')) {
@@ -120,4 +161,15 @@ for (const id of ['enedina', 'julieta', 'ramon']) {
   const grandchild = scene.elements.find(e => e.data.personId === id);
   check(grandchild.position.x === juana.position.x && grandchild.data.level === 'grandchildren', 'Nietos de diferentes uniones permanecen juntos');
 }
+const withoutGreatGrandchildren = build({...data,people:data.people.filter(p=>!scene.elements.some(e=>e.data.role==='great-grandchild' && e.data.personId===p.id))});
+assert.equal(withoutGreatGrandchildren.stats.greatGrandchildren,0);
+assert.equal(withoutGreatGrandchildren.levels[withoutGreatGrandchildren.levels.length-1].id,'grandchildren');
+assert(!withoutGreatGrandchildren.elements.some(e=>e.data.kind==='color-card'));
+
+// More than six progenitors must not silently reuse the initial palette.
+const extended = {...data,people:[...data.people,{id:'extra-juan',name:'Ejemplo adicional',birthDate:'2030-01-01',fatherId:'juan'},
+  {id:'extra-enedina',name:'Otro ejemplo',birthDate:'2026-01-01',motherId:'enedina'}]};
+const extendedScene = build(extended);
+assert.equal(extendedScene.greatGrandchildGroups.length,8);
+assert.equal(new Set(extendedScene.greatGrandchildGroups.map(g=>g.color)).size,8);
 console.log('Layout correcto: ' + assertions + ' comprobaciones, ' + data.people.length + ' personas como raíz a dos profundidades; ascendencia completa e incompleta.');

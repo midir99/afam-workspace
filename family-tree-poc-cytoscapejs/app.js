@@ -50,6 +50,14 @@
       boxSelectionEnabled: false,
       style: [
         {
+          selector: 'node[kind = "color-card"]',
+          style: {
+            shape: "rectangle", "background-color": "data(familyColor)", "background-opacity": 1,
+            "border-width": 0, padding: 6, "compound-sizing-wrt-labels": "include",
+            label: "", events: "no", "z-compound-depth": "bottom", "z-index": 0
+          }
+        },
+        {
           selector: 'node[kind = "person"]',
           style: {
             shape: "ellipse", width: 52, height: 52,
@@ -117,7 +125,11 @@
 
     function fitTree() {
       const padding = cy.width() < 640 ? 18 : 36;
-      const bounds = scene.bounds;
+      const graphBounds = cy.elements().boundingBox({ includeLabels: true, includeOverlays: false, includeUnderlays: false });
+      const bounds = {
+        x1: Math.min(scene.bounds.x1, graphBounds.x1), x2: Math.max(scene.bounds.x2, graphBounds.x2),
+        y1: Math.min(scene.bounds.y1, graphBounds.y1), y2: Math.max(scene.bounds.y2, graphBounds.y2)
+      };
       const zoom = Math.max(cy.minZoom(), Math.min(cy.maxZoom(),
         (cy.width() - 2 * padding) / (bounds.x2 - bounds.x1),
         (cy.height() - 2 * padding) / (bounds.y2 - bounds.y1)));

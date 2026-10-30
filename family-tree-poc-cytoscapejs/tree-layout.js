@@ -3,8 +3,15 @@
 
   const C = {
     pitch: 155, groupGap: 80, personHalfWidth: 70,
-    levelHeight: 180, nodeOffset: 85, busOffset: 18, grandchildPitch: 140
+    levelHeight: 180, nodeOffset: 85, busOffset: 18, grandchildPitch: 140, cardPadding: 6
   };
+
+  const FAMILY_COLORS = ["#e1d4ec", "#d1e8d0", "#ffefc7", "#f9cccc", "#d5e5ff", "#ffe4cd"];
+
+  function familyColor(index) {
+    // Extend the palette rather than cycling back to an already assigned colour.
+    return FAMILY_COLORS[index] || "hsl(" + ((index * 137.508) % 360).toFixed(2) + ", 55%, 85%)";
+  }
 
   function labelFor(name) {
     const lines = [""];
@@ -38,10 +45,12 @@
         shortText: "Padres de " + name + " y sus parejas: padre a la izquierda; madre a la derecha." },
       { id: "siblings",
         text: name + " y sus hermanos al centro; medios hermanos paternos a la izquierda y maternos a la derecha.",
-        shortText: name + " y hermanos al centro; medios hermanos paternos a la izquierda; maternos a la derecha." },
+        shortText: name + " y hermanos al centro; medios hermanos: paternos izq.; maternos der." },
       { id: "partners", text: "Parejas de " + name + ".", shortText: "Parejas de " + name + "." },
       { id: "children", text: "Hijos de " + name + ".", shortText: "Hijos de " + name + "." },
-      { id: "grandchildren", text: "Nietos de " + name + ".", shortText: "Nietos de " + name + "." }
+      { id: "grandchildren", text: "Nietos de " + name + ".", shortText: "Nietos de " + name + "." },
+      { id: "great-grandchildren", text: "Bisnietos de " + name + ": el color los relaciona con su padre o madre.",
+        shortText: "Bisnietos de " + name + ": el color los relaciona con su padre o madre." }
     ].filter(function (level) { return ancestorDepth === 3 || level.id !== "great-grandparents"; });
     const levelById = new Map();
     const y = {};
@@ -53,7 +62,7 @@
     });
     function busY(levelId) { return levelById.get(levelId).top + C.busOffset; }
 
-    const elements = [], groups = [];
+    const elements = [], cards = [], groups = [], greatGrandchildGroups = [];
     const occurrences = new Map(), nodes = new Map(), childrenIndex = new Map();
     const bounds = { x1: Infinity, y1: 0, x2: -Infinity, y2: levels[levels.length - 1].bottom };
     let sequence = 0;
@@ -94,6 +103,22 @@
       nodes.set(id, node);
       include(x, y, true);
       return id;
+    }
+
+    function addColorCard(nodeId, color, progenitorNodeId) {
+      const node = nodes.get(nodeId);
+      const cardId = "__color-card-" + nodeId;
+      cards.push({ data: {
+        id: cardId, kind: "color-card", familyColor: color, colorGroupId: progenitorNodeId,
+        personNodeId: nodeId, level: node.data.level
+      } });
+      node.data.parent = cardId;
+      node.data.familyColor = color;
+      node.data.colorGroupId = progenitorNodeId;
+      // Compounds size themselves from the person's body and label in Cytoscape.
+      // Reserve their padding in the model bounds used by the overview.
+      bounds.x1 = Math.min(bounds.x1, node.position.x - C.personHalfWidth - C.cardPadding);
+      bounds.x2 = Math.max(bounds.x2, node.position.x + C.personHalfWidth + C.cardPadding);
     }
 
     function junction(x, y) {
@@ -241,6 +266,7 @@
     const descendantWidth = descendantFamilies.reduce(function (sum, family) { return sum + familyWidth(family); }, 0) + Math.max(0, descendantFamilies.length - 1) * C.groupGap;
     let right = descendantWidth / 2;
     let maxGrandchildren = 0;
+    const grandchildEntries = [];
     descendantFamilies.forEach(function (family, index) {
       const left = right - familyWidth(family);
       const group = groupFor(family, "descendant", left, right, primary.id, index);
@@ -263,6 +289,7 @@
           edge(previous, fork, false, [child.id]);
           const grandchildNode = addPerson(grandchild, x, grandchildY, "grandchild", "grandchildren", "Nieto/a por " + child.name, group.id);
           edge(fork, grandchildNode, true, [child.id], grandchild.id);
+          grandchildEntries.push({ person: grandchild, nodeId: grandchildNode, parentX: x, y: grandchildY });
           previous = fork;
         });
       });
@@ -272,12 +299,45 @@
     const grandchildrenLevel = levelById.get("grandchildren");
     grandchildrenLevel.bottom = Math.max(grandchildrenLevel.bottom,
       y.grandchildren + Math.max(0, maxGrandchildren - 1) * C.grandchildPitch + 100);
-    const lastLevel = !descendantFamilies.length ? "siblings" : !maxGrandchildren ? "children" : "grandchildren";
+
+    // Families are built right to left above. Read the finished diagram left to
+    // right, then top to bottom, to obtain the order of great-grandchild columns.
+    const fertileGrandchildren = grandchildEntries.slice().sort(function (a, b) {
+      return a.parentX - b.parentX || a.y - b.y || a.nodeId.localeCompare(b.nodeId);
+    }).map(function (entry) {
+      return Object.assign({}, entry, { children: childrenOf(entry.person.id) });
+    }).filter(function (entry) { return entry.children.length > 0; });
+
+    const greatGrandchildrenLevel = levelById.get("great-grandchildren");
+    greatGrandchildrenLevel.top = grandchildrenLevel.bottom;
+    y["great-grandchildren"] = greatGrandchildrenLevel.top + C.nodeOffset;
+    let maxGreatGrandchildren = 0;
+    fertileGrandchildren.forEach(function (entry, columnIndex) {
+      const color = familyColor(columnIndex);
+      const x = (columnIndex - (fertileGrandchildren.length - 1) / 2) * C.pitch;
+      const group = { progenitorId: entry.person.id, progenitorNodeId: entry.nodeId,
+        color: color, x: x, childIds: [], childNodeIds: [] };
+      addColorCard(entry.nodeId, color, entry.nodeId);
+      entry.children.forEach(function (child, childIndex) {
+        const nodeId = addPerson(child, x, y["great-grandchildren"] + childIndex * C.grandchildPitch,
+          "great-grandchild", "great-grandchildren", "Bisnieto/a por " + entry.person.name, nodes.get(entry.nodeId).data.familyId);
+        addColorCard(nodeId, color, entry.nodeId);
+        group.childIds.push(child.id);
+        group.childNodeIds.push(nodeId);
+      });
+      greatGrandchildGroups.push(group);
+      maxGreatGrandchildren = Math.max(maxGreatGrandchildren, entry.children.length);
+    });
+    greatGrandchildrenLevel.bottom = Math.max(greatGrandchildrenLevel.top + C.levelHeight,
+      y["great-grandchildren"] + Math.max(0, maxGreatGrandchildren - 1) * C.grandchildPitch + 100);
+    const lastLevel = !descendantFamilies.length ? "siblings" : !maxGrandchildren ? "children" :
+      !maxGreatGrandchildren ? "grandchildren" : "great-grandchildren";
     levels.splice(levels.findIndex(function (level) { return level.id === lastLevel; }) + 1);
     bounds.y1 = 0;
     bounds.y2 = levels[levels.length - 1].bottom;
     return {
-      elements: elements, levels: levels, bounds: bounds, groups: groups,
+      elements: cards.concat(elements), levels: levels, bounds: bounds, groups: groups,
+      greatGrandchildGroups: greatGrandchildGroups,
       primaryId: primary.id, primaryNodeId: primaryNodeId, ancestorDepth: ancestorDepth,
       stats: {
         people: elements.filter(function (element) { return element.data.kind === "person"; }).length,
@@ -285,7 +345,8 @@
         families: groups.length, siblings: fullSiblings.length - 1,
         halfSiblings: elements.filter(function (element) { return element.data.role === "half-sibling"; }).length,
         children: childrenOf(primary.id).length,
-        grandchildren: elements.filter(function (element) { return element.data.role === "grandchild"; }).length
+        grandchildren: elements.filter(function (element) { return element.data.role === "grandchild"; }).length,
+        greatGrandchildren: elements.filter(function (element) { return element.data.role === "great-grandchild"; }).length
       }
     };
   }

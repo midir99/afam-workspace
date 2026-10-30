@@ -58,7 +58,21 @@
       { id: 'ernesto', name: 'Ernesto Zapata León', birthDate: '1991-04-05' },
       { id: 'josefina', name: 'Josefina Zapata Alarcón', birthDate: '2016-08-27', fatherId: 'ernesto', motherId: 'fernanda' },
       { id: 'pablo', name: 'Pablo Mendoza Sáenz', birthDate: '1990-12-23' },
-      { id: 'julian', name: 'Julián Mendoza Alarcón', birthDate: '2020-02-08', fatherId: 'pablo', motherId: 'fernanda' }
+      { id: 'julian', name: 'Julián Mendoza Alarcón', birthDate: '2020-02-08', fatherId: 'pablo', motherId: 'fernanda' },
+
+      // Escenario ilustrativo de generaciones posteriores. Las fechas futuras
+      // permiten conservar las edades de los progenitores del ejemplo original.
+      { id: 'lydia', name: 'Lydia Gray Alarcón', birthDate: '2035-04-12', motherId: 'isabel' },
+      { id: 'laura', name: 'Laura Gray Alarcón', birthDate: '2038-06-23', motherId: 'isabel' },
+      { id: 'mauricio', name: 'Mauricio Moctezuma Alarcón', birthDate: '2036-03-15', motherId: 'josefina' },
+      { id: 'fabricio', name: 'Fabricio Carrasco Noria', birthDate: '2040-09-17', fatherId: 'julian' },
+      { id: 'ester', name: 'Ester Alarcón Mirafuentes', birthDate: '2025-05-03', fatherId: 'jose' },
+      { id: 'alfredo', name: 'Alfredo Alarcón Mirafuentes', birthDate: '2028-08-19', fatherId: 'jose' },
+      { id: 'efesto', name: 'Efesto Alarcón Soto', birthDate: '2031-01-21', fatherId: 'jose' },
+      { id: 'maria-milagros', name: 'María Milagros Acosta', birthDate: '2027-07-10', motherId: 'julieta' },
+      { id: 'juventino', name: 'Juventino Flores Saldívar', birthDate: '2032-02-09', fatherId: 'ramon' },
+      { id: 'soledad', name: 'Soledad Flores Palma', birthDate: '2035-11-14', fatherId: 'ramon' },
+      { id: 'hector', name: 'Héctor Flores Saldívar', birthDate: '2038-10-22', fatherId: 'ramon' }
     ]
   };
 }());
