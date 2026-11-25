@@ -2,21 +2,24 @@
 
 Proyecto: archivo histórico y genealógico de San Andrés de la Cal, Tepoztlán, Morelos, México.
 
-Actualizado: 2026-11-24.
+Actualizado: 2026-11-25.
 
 ## 1. Alcance del diseño
 
 Este documento describe el diseño vigente para admitir varios árboles y colaboradores. Al actualizarlo se sustituyen las decisiones que cambien, sin conservar un historial ni comparaciones con diseños anteriores.
 
-`Gardener` es el nombre acordado para la participación de un usuario en un árbol. `Tree.visibility` determina si el árbol es `public` o `private`. `Person.place_of_birth` y `Person.place_of_death` identifican las localidades de nacimiento y fallecimiento. `Person.portrait` y `Person.tree_portrait` contienen los retratos para resultados de búsqueda y nodos del árbol. `PersonPicture` contiene las imágenes de la galería. Los demás nombres en inglés siguen sujetos a revisión.
+`Gardener` es el nombre acordado para la participación de un usuario en un árbol. `Tree.visibility` determina si el árbol es `public` o `private`; `Tree.status`, si está `active` o `archived`. `Tree.picture` identifica visualmente el árbol en los listados. `Tree.description` presenta el árbol en los listados y `Tree.documentation` contiene su documentación extensa. `Tree.updated_at` registra la última modificación del árbol o de su contenido. `Person.place_of_birth` y `Person.place_of_death` identifican las localidades de nacimiento y fallecimiento. `Person.portrait` y `Person.tree_portrait` contienen los retratos para resultados de búsqueda y nodos del árbol. `PersonPicture` contiene las imágenes de la galería. Los demás nombres en inglés siguen sujetos a revisión.
+
+`TreeActivity` registra las acciones realizadas sobre el árbol, sus personas y sus jardineros, con el autor, el objetivo y los valores que cambiaron.
 
 Los detalles técnicos propuestos y las decisiones pendientes se indican expresamente. [models.py](models.py) sirve como referencia de implementación; este documento define el diseño y no implica que todos sus campos estén implementados.
 
 | Modelo | Propósito | Definición |
 | --- | --- | --- |
 | `User` — Usuario | Cuenta de quien accede al sitio y participa en árboles. | Esquema de autenticación propuesto. |
-| `Tree` — Árbol | Colección de personas, relaciones e historias, con visibilidad pública o privada. | Entidad y visibilidad acordadas; detalles técnicos propuestos. |
+| `Tree` — Árbol | Colección de personas, relaciones e historias, con imagen representativa, presentación, documentación, visibilidad y estado. | Entidad, imagen representativa, descripción breve, documentación extensa, actualización del contenido, visibilidad y estado acordados; detalles técnicos propuestos. |
 | `Gardener` | Participación de un usuario en un árbol y su rol. | Nombre, relación y roles acordados; detalles técnicos propuestos. |
+| `TreeActivity` | Bitácora de acciones realizadas dentro de un árbol. | Nombre, campos y reglas acordados; conservación al eliminar el árbol completo pendiente de definir. |
 | `Person` — Persona | Individuo documentado dentro de un árbol. | Pertenece a un solo árbol; tiene vínculos familiares con personas de ese árbol. |
 | `PersonPicture` | Imagen de la galería de una persona. | Nombre, campos y orden de presentación acordados; detalles técnicos propuestos. |
 | `Locality` — Localidad | Localidad geográfica y contenido sobre ella. | Alcance de su contenido editorial pendiente de definir. |
@@ -45,6 +48,8 @@ erDiagram
     User ||--o{ Gardener : participa
     Tree ||--|{ Gardener : tiene
     Tree ||--o{ Person : contiene
+    Tree ||--o{ TreeActivity : registra
+    TreeActivity }o--o| Gardener : gardener
     Person ||--o{ PersonPicture : tiene
     Person }o--o| Locality : place_of_birth
     Person }o--o| Locality : place_of_death
@@ -57,6 +62,8 @@ erDiagram
 | `User` ↔ `Tree` | Muchos a muchos mediante `Gardener`. Un usuario puede participar en varios árboles con roles diferentes. |
 | `Tree` → `Gardener` | Un árbol válido tiene al menos un participante con rol `owner`; puede tener más participantes. Esa condición requiere validación adicional a las FK. |
 | `Tree` → `Person` | Un árbol contiene cero o muchas personas. Cada persona pertenece a un solo árbol. |
+| `Tree` → `TreeActivity` | Un árbol tiene cero o muchas actividades. Cada actividad pertenece a un solo árbol. |
+| `TreeActivity` → `Gardener`, por `gardener` | Cada actividad tiene un jardinero al registrarse; la referencia puede quedar vacía si después se elimina su participación. Un jardinero puede realizar muchas actividades. |
 | `Person` → `PersonPicture` | Una persona tiene cero o muchas imágenes de galería. Cada imagen pertenece a una sola persona. |
 | `Person` → `Person`, por `father` | Una persona tiene cero o un padre registrado; ese padre puede tener muchos hijos. |
 | `Person` → `Person`, por `mother` | Una persona tiene cero o una madre registrada; esa madre puede tener muchos hijos. |
@@ -64,6 +71,8 @@ erDiagram
 | `Person` → `Locality`, por `place_of_death` | Una persona tiene cero o una localidad de fallecimiento registrada; una localidad puede ser lugar de fallecimiento de muchas personas. |
 
 La entidad de relaciones de pareja está pendiente de diseñar.
+
+El objetivo de una actividad se identifica mediante `target_type` y `target_id`, sin FK al registro afectado. Las relaciones de la bitácora dibujadas corresponden a sus FK `tree` y `gardener`.
 
 ## 4. User — Usuario
 
@@ -95,7 +104,7 @@ Pendientes: confirmar esta base, si se accede por nombre de usuario o correo, y 
 
 ## 5. Tree — Árbol
 
-La entidad y el campo `visibility`, con valores `public` y `private`, están acordados. Los tipos, tamaños y campos auxiliares son una propuesta técnica.
+La entidad y los campos `picture`, `description`, `documentation`, `updated_at`, `visibility` y `status`, con las funciones descritas a continuación, están acordados. Los tamaños y los detalles técnicos de implementación son una propuesta.
 
 Un árbol puede representar una familia, varias familias o una comunidad completa. No necesita tener una única persona raíz permanente.
 
@@ -103,11 +112,14 @@ Un árbol puede representar una familia, varias familias o una comunidad complet
 | --- | --- | --- | --- |
 | `id` | `UUIDField` / `uuid`, PK | Automático: `uuid.uuid4`. | Identificador estable del árbol. |
 | `name` | `CharField(200)` / `varchar(200)` | Obligatorio. | Nombre elegido por el creador, por ejemplo «El Árbol de San Andrés». |
-| `description` | `TextField` / `text` | Opcional. | Propósito, alcance y presentación del árbol. |
+| `picture` | `ImageField` / `varchar(100)` | Opcional. | Referencia a la imagen representativa del árbol, optimizada y almacenada en R2, que se muestra junto a su nombre y descripción en los listados del sitio. |
+| `description` | `TextField` / `text` | Opcional. | Descripción breve de una o dos líneas para presentar el árbol en los listados. |
+| `documentation` | `TextField` / `text` | Opcional; contenido extenso. | Documentación que aparece en la página del árbol: presentación detallada, historia, fuentes, criterios, instrucciones y enlaces a materiales externos. El editor de texto queda pendiente de elegir. |
 | `visibility` | `CharField(7)` / `varchar(7)` | Obligatorio; valor predeterminado pendiente de definir. | Acceso a la consulta: `public` para cualquiera y `private` para usuarios con un registro `Gardener` en este árbol. |
+| `status` | `CharField(8)` / `varchar(8)` | Obligatorio; valor inicial propuesto: `active`. | Estado del árbol: `active` permite editar según los permisos; `archived` conserva la consulta y suspende las ediciones del contenido. |
 | `slug` | `SlugField(200)` / `varchar(200)` | Obligatorio, único en el sitio. | Segmento legible de su dirección web. |
 | `created_at` | `DateTimeField` / `timestamptz` | Automático: `auto_now_add=True`. | Momento de creación. |
-| `updated_at` | `DateTimeField` / `timestamptz` | Automático: `auto_now=True`. | Última modificación de esta fila. |
+| `updated_at` | `DateTimeField` / `timestamptz` | Inicializado al crear y actualizado por la aplicación. | Última modificación del árbol, su contenido o sus participaciones, incluyendo personas, relaciones, imágenes e historias. |
 
 ### Reglas
 
@@ -120,7 +132,16 @@ Un árbol puede representar una familia, varias familias o una comunidad complet
 - La visibilidad pública permite consultar; la edición y administración requieren el rol correspondiente.
 - Cambiar `visibility` corresponde al `owner` y conserva los registros `Gardener` existentes.
 - Los únicos valores admitidos para `visibility` son `public` y `private`. Su valor predeterminado queda pendiente de decidir.
-- `updated_at` de este modelo no se actualiza automáticamente cuando cambia una persona, fotografía o membresía del árbol.
+- `description` se muestra como presentación breve en los listados; `documentation` se muestra como contenido extenso en la página del árbol.
+- `picture` permite identificar visualmente el árbol en los listados. Sus dimensiones y detalles de recorte quedan pendientes de definir.
+- La elección del editor de `documentation` queda pendiente; su biblioteca y formato de edición no están definidos.
+- Los únicos valores admitidos para `status` son `active` y `archived`.
+- `status = active`: el contenido puede crearse, modificarse y borrarse según los permisos de `Gardener`.
+- `status = archived`: el contenido se conserva para consulta y se suspenden sus ediciones. El `owner` puede reactivar el árbol cambiando su estado a `active`.
+- `status` y `visibility` son independientes: archivar conserva la visibilidad del árbol, tanto pública como privada.
+- Cambiar `status` corresponde al `owner` y conserva los registros `Gardener` existentes.
+- Las operaciones que creen, modifiquen o eliminen datos del árbol, su contenido o sus participaciones deben actualizar `Tree.updated_at`. Cambiar registros relacionados requiere que la aplicación actualice explícitamente esta fecha.
+- La modificación, su entrada en `TreeActivity` y la actualización de `Tree.updated_at` se guardan en la misma transacción.
 
 ## 6. Gardener
 
@@ -143,9 +164,13 @@ El nombre, las referencias y los roles están acordados. PK, tamaños, timestamp
 | --- | --- | --- | --- |
 | Consultar personas e historias | Sí | Sí | Sí |
 | Crear, modificar y borrar personas, relaciones e historias | Sí | Sí | No |
-| Cambiar nombre, descripción y visibilidad del árbol | Sí | No | No |
+| Cambiar nombre, imagen representativa, descripción y visibilidad del árbol | Sí | No | No |
 | Administrar colaboradores y sus roles | Sí | No | No |
 | Eliminar el árbol completo | Sí | No | No |
+| Archivar o reactivar el árbol | Sí | No | No |
+| Consultar la bitácora de actividades del árbol | Sí | Sí | No |
+
+La edición del contenido requiere `Tree.status = active`, además del rol correspondiente. La consulta respeta `Tree.visibility` tanto en árboles activos como archivados.
 
 ### Reglas
 
@@ -227,7 +252,7 @@ Los retratos pueden generarse a partir de la misma fotografía o de fotografías
 | Estado vital | Representación de persona viva, fallecida y estado desconocido. La ausencia de fecha de defunción no demuestra que esté viva. |
 | Slug | Confirmar el alcance de unicidad y si la dirección de la ficha utiliza slug o UUID. |
 | Procesamiento de imágenes | Dimensiones, formatos y ajustes de recorte para los retratos y las imágenes de galería. |
-| Autoría | Referencias a los usuarios que crean y modifican contenido y necesidad de conservar revisiones. |
+| Autoría del contenido y revisiones | Atribución de relatos y documentos y eventual recuperación de versiones. Las actividades de edición se registran en `TreeActivity`. |
 | Historias y fuentes | Estructura de relatos independientes con autores, documentos y fuentes opcionales. |
 | Acceso inverso a hijos | Nombres de los accesores de Django para recorrer la descendencia. |
 
@@ -254,14 +279,14 @@ El nombre y los campos están acordados. Se propone usar UUID como PK, conforme 
 - `created_at` representa la incorporación al sitio; la fecha en que se tomó la fotografía puede describirse en `caption`.
 - Modificar una imagen o su descripción actualiza `updated_at` y conserva su orden de incorporación.
 - La pertenencia al árbol y los permisos se obtienen mediante `person.tree`; la imagen respeta la visibilidad y los roles de ese árbol.
-- La información descriptiva se escribe en `caption`. Las referencias estructuradas de autoría y fuentes quedan pendientes de un diseño específico.
+- La información descriptiva se escribe en `caption`. La autoría de las fotografías y sus fuentes quedan pendientes de un diseño específico; las actividades de edición se registran en `TreeActivity`.
 
 ### Procesamiento y almacenamiento de imágenes de personas
 
 - R2 conserva los retratos y las imágenes de galería optimizados para la web. PostgreSQL guarda sus referencias.
 - Las imágenes de galería conservan el encuadre completo con resolución suficiente para su consulta; las dimensiones y los formatos se definirán al implementar el procesamiento.
 - Los archivos recibidos se utilizan temporalmente para generar las versiones necesarias y se descartan una vez procesadas y guardadas correctamente.
-- El espacio para documentar el árbol y referenciar archivos externos se diseñará por separado.
+- La documentación del árbol y los enlaces a archivos externos se escriben en `Tree.documentation`.
 
 ## 9. Locality — Localidad
 
@@ -319,7 +344,82 @@ Todas son opcionales. Las imágenes usan `upload_to="pictures/localities/"`.
 
 Se propone compartir el catálogo geográfico entre árboles. Su historia, fotografías y demás contenido editorial necesitarían una pertenencia al árbol si queremos que cada autor conserve su propia versión. La ubicación de esos campos en entidades nuevas todavía no se ha decidido.
 
-## 10. Reglas generales de relaciones e integridad
+## 10. TreeActivity
+
+Representa una acción significativa realizada dentro de un árbol sobre `Tree`, `Person` o `Gardener`. Los cambios de retratos y galerías se atribuyen al árbol o a la persona correspondiente.
+
+El nombre, los campos y las reglas están acordados. Los tamaños de texto son una propuesta técnica. La conservación de la bitácora al eliminar un árbol completo queda pendiente de decidir.
+
+### 10.1. Campos
+
+| Campo | Tipo Django / PostgreSQL | Captura o valor inicial | Descripción |
+| --- | --- | --- | --- |
+| `id` | `UUIDField` / `uuid`, PK | Automático: `uuid.uuid4`; no editable. | Identificador de la actividad. |
+| `tree` | FK a `Tree` / `uuid` | Obligatorio; asignado por la aplicación. | Árbol al que pertenece. El comportamiento al eliminar el árbol completo queda pendiente. |
+| `gardener` | FK a `Gardener` / `uuid` | Asignado al registrar la acción; admite `NULL`. | Jardinero que realizó la acción. Usa `SET_NULL` si después se elimina su participación, conservando la actividad. |
+| `actor_name` | `TextField` / `text` | Obligatorio; capturado por la aplicación. | Nombre del jardinero al realizar la acción. Se conserva como dato histórico aunque cambie su nombre o deje el árbol. |
+| `action` | `CharField(10)` / `varchar(10)` | Obligatorio; sin valor predeterminado. | Acción: `created`, `updated` o `deleted`. |
+| `target_type` | `CharField(10)` / `varchar(10)` | Obligatorio; sin valor predeterminado. | Tipo del registro afectado: `tree`, `person` o `gardener`. |
+| `target_id` | `UUIDField` / `uuid`, sin FK | Obligatorio; capturado por la aplicación. | Identificador del registro afectado, conservado aunque se elimine. |
+| `target_label` | `TextField` / `text` | Obligatorio; capturado por la aplicación. | Nombre o descripción del registro afectado en ese momento. |
+| `changes` | `JSONField` / `jsonb` | Obligatorio; generado por la aplicación. | Valores anteriores y nuevos de los datos afectados. |
+| `created_at` | `DateTimeField` / `timestamptz` | Automático: `auto_now_add=True`. | Momento en que se registró la actividad. |
+
+### 10.2. Objetivos y acciones
+
+| `target_type` | Registro identificado por `target_id` | Alcance |
+| --- | --- | --- |
+| `tree` | El propio `Tree`. | Nombre, imagen representativa, descripción, documentación, visibilidad y estado. |
+| `person` | Una `Person` del árbol. | Datos personales, parentescos, retratos e imágenes de galería. |
+| `gardener` | Una participación `Gardener` del árbol. | Incorporación de colaboradores, cambios de rol y retiro de su participación. |
+
+`gardener` identifica a quien realiza la acción. El objetivo puede ser otra participación: por ejemplo, el jardinero de Jorge cambia el rol del jardinero de Lucía.
+
+Los cambios de `Tree.picture` tienen como objetivo el árbol. Agregar, modificar o eliminar un registro `PersonPicture` tiene como objetivo su persona y se registra como `updated`; `changes` identifica la imagen y sus datos.
+
+### 10.3. Estructura de changes
+
+Cada dato afectado contiene sus valores `before` y `after`:
+
+```json
+{
+  "role": {
+    "before": "reader",
+    "after": "editor"
+  }
+}
+```
+
+| `action` | `before` | `after` |
+| --- | --- | --- |
+| `created` | `null`. | Valor registrado. |
+| `updated` | Valor anterior. | Valor nuevo. |
+| `deleted` | Valor que tenía el registro. | `null`. |
+
+- Las modificaciones incluyen únicamente los datos que realmente cambiaron.
+- Las creaciones y eliminaciones incluyen los datos relevantes para describir el registro.
+- Los detalles de imágenes permiten identificar qué imagen se agregó, modificó o eliminó y los datos afectados.
+
+### 10.4. Reglas de registro e integridad
+
+- La aplicación identifica al jardinero mediante la sesión autenticada. Al realizar la acción debe existir su participación en el árbol y tener los permisos correspondientes.
+- El jardinero y el objetivo corresponden al mismo árbol. Cuando `target_type = tree`, `target_id` coincide con `tree.id`.
+- La existencia, el tipo y la pertenencia del objetivo se validan en la aplicación; `target_id` no tiene una FK que los compruebe. Para eliminaciones, la comprobación se realiza antes de borrar el registro.
+- Una acción significativa produce una actividad. Modificar varios campos en un mismo guardado genera una entrada con todos esos cambios.
+- Los guardados sin cambios reales y las actualizaciones puramente técnicas no generan actividades adicionales. Actualizar `Tree.updated_at` no produce otra entrada.
+- `actor_name` y `target_label` se capturan al registrar la actividad y conservan su contenido aunque después cambien los nombres de los registros relacionados.
+- La modificación, su actividad y la actualización de `Tree.updated_at` se guardan en una misma transacción.
+- La edición del contenido respeta `Tree.status`. Las acciones autorizadas de archivar y reactivar también se registran.
+- Eliminar una persona o retirar a un jardinero conserva las actividades, sus identificadores de objetivo y sus nombres históricos. La FK `gardener` puede quedar en `NULL`.
+
+### 10.5. Consulta y conservación
+
+- Los jardineros consultan las entradas, pero no las editan. Los datos históricos se conservan; el modelo contiene `created_at` como fecha de registro.
+- La consulta inicial está habilitada para `owner` y `editor` del árbol; `reader` no tiene acceso a la bitácora. La visibilidad pública del árbol no convierte su bitácora en pública.
+- Las actividades se muestran por `created_at` descendente, con filtros por jardinero, acción o registro afectado.
+- La política de conservación al eliminar el árbol completo queda pendiente de definir, junto con el comportamiento de borrado de la FK `tree`.
+
+## 11. Reglas generales de relaciones e integridad
 
 - Se guardan vínculos directos. Abuelos, bisabuelos, hermanos, medios hermanos, nietos y bisnietos se calculan a partir de ellos; no necesitan tablas propias por nivel.
 - Tener hijos en común no demuestra que haya existido matrimonio. La filiación y la relación de pareja deben poder representarse por separado.
@@ -335,11 +435,11 @@ Se propone compartir el catálogo geográfico entre árboles. Su historia, fotog
 
 Los comportamientos `CASCADE` y `SET_NULL` descritos corresponden a `on_delete` de Django. Deben revisarse junto con las reglas de autorización y conservación antes de implementar borrados.
 
-## 11. Decisiones pendientes para completar el diagrama
+## 12. Decisiones pendientes para completar el diagrama
 
 | Tema | Qué falta decidir |
 | --- | --- |
-| Nombres | Nombres definitivos de `User`, `Tree`, `Person`, `Locality` y los atributos pendientes. `Gardener`, `PersonPicture`, `visibility`, `place_of_birth`, `place_of_death`, `portrait` y `tree_portrait` están acordados. |
+| Nombres | Nombres definitivos de `User`, `Tree`, `Person`, `Locality` y los atributos pendientes. `Gardener`, `PersonPicture`, `TreeActivity` con sus campos, `picture`, `description`, `documentation`, `updated_at`, `visibility`, `status`, `place_of_birth`, `place_of_death`, `portrait` y `tree_portrait` están acordados. |
 | Autenticación | Base de `User`, identificador de acceso y requisitos del correo. |
 | Visibilidad | Valor predeterminado de `Tree.visibility` al crear un árbol. |
 | Propiedad | Uno o varios `owner`; flujo para transferir propiedad y eliminar cuentas. |
@@ -347,18 +447,21 @@ Los comportamientos `CASCADE` y `SET_NULL` descritos corresponden a `on_delete` 
 | Fechas | Estructura para fechas parciales, aproximadas y desconocidas. |
 | Estado vital | Campo y reglas para vivo, fallecido o desconocido. |
 | Imágenes de personas | Dimensiones, formatos y ajustes de recorte de retratos y galería. |
+| Imagen del árbol | Dimensiones y ajustes de recorte de `Tree.picture` para los listados. |
 | Documentos | Entidades y relación con personas o historias. |
-| Documentación del árbol | Espacio para documentar el árbol y referenciar archivos externos. |
+| Editor de documentación | Biblioteca y formato de edición para `Tree.documentation`. |
 | Historias y fuentes | Mantener textos dentro de la ficha o crear relatos independientes con autoría y referencias. |
 | Localidades | Separación entre catálogo compartido y contenido editorial de cada árbol. |
 | Direcciones web | UUID o slugs; alcance de unicidad de los slugs de persona. |
 | Borrado y archivo | Confirmar cascadas, referencias que se conservan y comportamiento público de las fichas archivadas. |
+| Conservación de actividades | Política de conservación de `TreeActivity` y comportamiento de su FK `tree` al eliminar el árbol completo. |
 
-## 12. Referencias
+## 13. Referencias
 
 - [Modelos de referencia](models.py): implementación de referencia para los campos de `Person` y `Locality`.
 - [Tecnologías del proyecto](tools-for-the-project.md): PostgreSQL, Django y almacenamiento R2.
 - [Reglas del árbol visual](reglas-arbol-v2.md): distribución e interacción de la vista genealógica.
 - [Campos de Django](https://docs.djangoproject.com/en/5.2/ref/models/fields/): tipos, opciones y referencias a archivos.
+- [Transacciones de Django](https://docs.djangoproject.com/en/5.2/topics/db/transactions/): guardado conjunto de cambios, actividades y fecha de actualización del árbol.
 
 Las referencias a Django 5.2 documentan el comportamiento consultado; no fijan la versión del proyecto. Este documento no modifica `models.py` ni constituye una migración ejecutada.
